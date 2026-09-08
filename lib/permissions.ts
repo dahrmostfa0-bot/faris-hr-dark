@@ -219,7 +219,7 @@ export function hasCompanyPermission(role: CompanyRole | undefined, perm: Permis
 
 export function canAccessRoute(role: RoleName | undefined, route: string): boolean {
   const map: Record<string, Permission> = {
-    '/': 'dashboard.view',
+    '/dashboard': 'dashboard.view',
     '/employees': 'employees.view',
     '/attendance': 'attendance.view',
     '/leaves': 'leaves.view',
@@ -244,7 +244,7 @@ export function canAccessRoute(role: RoleName | undefined, route: string): boole
 
 export function canAccessRouteCompany(role: CompanyRole | undefined, route: string): boolean {
   const map: Record<string, Permission> = {
-    '/': 'dashboard.view',
+    '/dashboard': 'dashboard.view',
     '/employees': 'employees.view',
     '/attendance': 'attendance.view',
     '/leaves': 'leaves.view',

@@ -34,15 +34,15 @@ export default function LoginPage() {
     if (mode === 'login') {
       const { error: err } = await signIn(email, password);
       if (err) setError(err);
-      else router.replace('/');
+      else router.replace('/dashboard');
     } else if (mode === 'create') {
       const { error: err } = await signUpWithCompany(email, password, fullName, companyName, 'create');
       if (err) setError(err);
-      else router.replace('/');
+      else router.replace('/dashboard');
     } else {
       const { error: err } = await signUpWithCompany(email, password, fullName, companyName, 'join', joinCode || companyName);
       if (err) setError(err);
-      else router.replace('/');
+      else router.replace('/dashboard');
     }
     setBusy(false);
   }

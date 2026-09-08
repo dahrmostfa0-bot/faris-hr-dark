@@ -27,7 +27,7 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { title: 'لوحة التحكم', href: '/', icon: LayoutDashboard, permission: 'dashboard.view' },
+  { title: 'لوحة التحكم', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
   { title: 'الموظفون', href: '/employees', icon: Users, permission: 'employees.view' },
   { title: 'الحضور والانصراف', href: '/attendance', icon: Clock, permission: 'attendance.view' },
   { title: 'الإجازات', href: '/leaves', icon: CalendarDays, permission: 'leaves.view' },
