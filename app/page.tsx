@@ -76,7 +76,7 @@ export default function LandingPage() {
     company_name: '',
     email: '',
     phone: '',
-    org_type: 'school',
+    organization_type: 'school',
   });
 
   async function handleSubmit(e: FormEvent) {
@@ -91,14 +91,20 @@ export default function LandingPage() {
         company_name: form.company_name,
         email: form.email,
         phone: form.phone,
-        org_type: form.org_type,
+        organization_type: form.organization_type,
       });
       if (error) throw error;
-      toast({ title: 'تم الإرسال', description: 'سنتواصل معك قريباً لتفعيل النسخة التجريبية' });
-      setForm({ company_name: '', email: '', phone: '', org_type: 'school' });
+      toast({
+        title: 'تم استقبال طلبك بنجاح!',
+        description: 'سيتواصل معك فريق الدعم لتجهيز نسختك التجريبية.',
+      });
+      setForm({ company_name: '', email: '', phone: '', organization_type: 'school' });
     } catch {
-      toast({ title: 'تم الإرسال', description: 'سنتواصل معك قريباً لتفعيل النسخة التجريبية' });
-      setForm({ company_name: '', email: '', phone: '', org_type: 'school' });
+      toast({
+        title: 'حدث خطأ',
+        description: 'تعذر إرسال الطلب. يرجى المحاولة مرة أخرى.',
+        variant: 'destructive',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -461,9 +467,9 @@ export default function LandingPage() {
                       <div className="grid grid-cols-2 gap-3">
                         <button
                           type="button"
-                          onClick={() => setForm((f) => ({ ...f, org_type: 'school' }))}
+                          onClick={() => setForm((f) => ({ ...f, organization_type: 'school' }))}
                           className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-all ${
-                            form.org_type === 'school'
+                            form.organization_type === 'school'
                               ? 'border-primary bg-primary/10 text-primary'
                               : 'border-border text-muted-foreground hover:border-primary/30'
                           }`}
@@ -472,9 +478,9 @@ export default function LandingPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setForm((f) => ({ ...f, org_type: 'company' }))}
+                          onClick={() => setForm((f) => ({ ...f, organization_type: 'company' }))}
                           className={`flex items-center justify-center gap-2 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-all ${
-                            form.org_type === 'company'
+                            form.organization_type === 'company'
                               ? 'border-primary bg-primary/10 text-primary'
                               : 'border-border text-muted-foreground hover:border-primary/30'
                           }`}
