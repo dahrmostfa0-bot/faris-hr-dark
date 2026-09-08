@@ -76,7 +76,8 @@ export default function EmployeeDetailPage() {
     const file = e.target.files?.[0];
     if (!file || !emp) return;
     setUploading(true);
-    const path = `employees/${emp.id}/${type}/${Date.now()}-${file.name}`;
+    const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_').replace(/_+/g, '_');
+    const path = `${emp.id}/${type}/${Date.now()}-${safeName}`;
     const { error: upErr } = await supabase.storage.from('employee-docs').upload(path, file);
     if (upErr) {
       toast({ title: 'خطأ', description: upErr.message, variant: 'destructive' });
