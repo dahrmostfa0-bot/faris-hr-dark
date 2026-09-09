@@ -41,16 +41,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Persistent sidebar on md+ screens */}
-      <div className="hidden w-64 shrink-0 md:flex">
-        <Sidebar />
-      </div>
+      <Sidebar className="hidden md:flex" />
 
       {/* Mobile slide-over drawer */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <div className="absolute inset-y-0 right-0 w-64 animate-slide-in">
-            <Sidebar onNavigate={() => setMobileOpen(false)} />
+            <Sidebar onNavigate={() => setMobileOpen(false)} className="flex h-full" />
           </div>
         </div>
       )}

@@ -9,7 +9,7 @@ import { hasCompanyPermission, hasPermission } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import { COMPANY_ROLE_LABELS } from '@/lib/types';
 
-export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; className?: string }) {
   const pathname = usePathname();
   const { companyRole, role, company } = useAuth();
 
@@ -21,7 +21,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   });
 
   return (
-    <aside className="flex h-full w-64 flex-col border-l border-border/50 bg-card/80 backdrop-blur-xl">
+    <aside className={cn("flex h-screen w-64 shrink-0 flex-col border-l border-border/50 bg-card/80 backdrop-blur-xl", className)}>
       <div className="flex h-16 items-center gap-2.5 border-b border-border/50 px-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-primary shadow-glow-primary">
           <Building2 className="h-5 w-5 text-white" />
