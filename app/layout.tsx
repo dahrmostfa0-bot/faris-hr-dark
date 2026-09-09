@@ -1,32 +1,29 @@
-import './globals.css';
-import type { Metadata } from 'next';
-import { Cairo, Tajawal } from 'next/font/google';
-import { ThemeProvider } from '@/components/theme-provider';
-import { AuthProvider } from '@/lib/auth-context';
-import { Toaster } from '@/components/ui/toaster';
+ import type { Metadata } from "next";
+import { IBM_Plex_Sans_Arabic } from "next/font/google";
+import "./globals.css";
 
-const cairo = Cairo({ subsets: ['arabic', 'latin'], display: 'swap', variable: '--font-cairo' });
-const tajawal = Tajawal({ subsets: ['arabic', 'latin'], display: 'swap', variable: '--font-tajawal', weight: ['400', '500', '700'] });
+const plexArabic = IBM_Plex_Sans_Arabic({
+  subsets: ["arabic"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-arabic",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: 'نظام فارس دحروج لإدارة الموارد البشرية - Faris HR',
-  description: 'نظام متكامل لإدارة شؤون الموظفين - الحضور، الإجازات، الرواتب، العقود، التقييم',
+  title: "فارس دحروج الذكي | نظام إدارة الموارد البشرية",
+  description:
+    "نظام ذكي لإدارة الموظفين والحضور والإجازات والرواتب والعقود والملفات والتوظيف في منصة واحدة.",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <html lang="ar" dir="rtl" suppressHydrationWarning className={`${cairo.variable} ${tajawal.variable}`}>
-      <body className="font-tajawal antialiased" suppressHydrationWarning>
-        <ThemeProvider>
-          <AuthProvider>
-            {children}
-            <Toaster />
-          </AuthProvider>
-        </ThemeProvider>
+    <html lang="ar" dir="rtl" className={plexArabic.variable}>
+      <body className={`${plexArabic.className} antialiased`}>
+        {children}
       </body>
     </html>
   );
