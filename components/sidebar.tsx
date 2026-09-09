@@ -17,7 +17,8 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
     if (!item.permission) return true;
     if (companyRole) return hasCompanyPermission(companyRole, item.permission);
     if (role) return hasPermission(role, item.permission);
-    return true;
+    // No role detected: show only employee-level items
+    return hasPermission('employee', item.permission);
   });
 
   return (
