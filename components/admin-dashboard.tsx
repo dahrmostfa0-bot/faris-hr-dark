@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
+import { GuideIndicator } from '@/components/guide-indicator';
 import {
   Card,
   CardContent,
@@ -227,11 +228,21 @@ export function AdminDashboard() {
         <StatCard title="الموظفون النشطون" value={stats.active} icon={UserCheck} color="success" />
         <StatCard title="موظفون جدد" value={stats.newHires} icon={UserPlus} color="accent" trend="آخر 30 يوم" trendUp />
         <StatCard title="المستقيلون" value={stats.resigned} icon={UserMinus} color="destructive" />
-        <StatCard title="الحضور اليوم" value={stats.presentToday} icon={Clock} color="success" />
+        <div className="relative">
+          <StatCard title="الحضور اليوم" value={stats.presentToday} icon={Clock} color="success" />
+          <div className="absolute -top-1.5 left-1.5 z-10">
+            <GuideIndicator text="تتبع ذكي يومي مدعوم بخاصية استيراد سجلات أجهزة البصمة مباشرة لمنع التلاعب والأخطاء." side="top" />
+          </div>
+        </div>
         <StatCard title="الغياب اليوم" value={stats.absentToday} icon={UserMinus} color="destructive" />
         <StatCard title="التأخير اليوم" value={stats.lateToday} icon={AlertTriangle} color="warning" />
         <StatCard title="الإجازات الجارية" value={stats.onLeave} icon={CalendarDays} color="accent" />
-        <StatCard title="إجمالي الرواتب" value={formatCurrency(stats.totalPayroll)} icon={Wallet} color="primary" />
+        <div className="relative">
+          <StatCard title="إجمالي الرواتب" value={formatCurrency(stats.totalPayroll)} icon={Wallet} color="primary" />
+          <div className="absolute -top-1.5 left-1.5 z-10">
+            <GuideIndicator text="حساب مؤتمت بالكامل للراتب الأساسي، البدلات، والخصومات مع دعم تصدير ملفات Excel ومسيرات البنوك." side="top" />
+          </div>
+        </div>
         <StatCard title="عقود تنتهي قريباً" value={stats.endingContracts} icon={FileText} color="warning" />
       </div>
 

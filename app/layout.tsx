@@ -1,29 +1,35 @@
- import type { Metadata } from "next";
-import { IBM_Plex_Sans_Arabic } from "next/font/google";
-import "./globals.css";
+import './globals.css';
+import type { Metadata } from 'next';
+import { Cairo, Tajawal } from 'next/font/google';
+import { ThemeProvider } from '@/components/theme-provider';
+import { AuthProvider } from '@/lib/auth-context';
+import { GuideProvider } from '@/lib/guide-context';
+import { Toaster } from '@/components/ui/toaster';
 
-const plexArabic = IBM_Plex_Sans_Arabic({
-  subsets: ["arabic"],
-  weight: ["300", "400", "500", "600", "700"],
-  variable: "--font-arabic",
-  display: "swap",
-});
+const cairo = Cairo({ subsets: ['arabic', 'latin'], display: 'swap', variable: '--font-cairo' });
+const tajawal = Tajawal({ subsets: ['arabic', 'latin'], display: 'swap', variable: '--font-tajawal', weight: ['400', '500', '700'] });
 
 export const metadata: Metadata = {
-  title: "فارس دحروج الذكي | نظام إدارة الموارد البشرية",
-  description:
-    "نظام ذكي لإدارة الموظفين والحضور والإجازات والرواتب والعقود والملفات والتوظيف في منصة واحدة.",
+  title: 'نظام فارس دحروج لإدارة الموارد البشرية - Faris HR',
+  description: 'نظام متكامل لإدارة شؤون الموظفين - الحضور، الإجازات، الرواتب، العقود، التقييم',
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="ar" dir="rtl" className={plexArabic.variable}>
-      <body className={`${plexArabic.className} antialiased`}>
-        {children}
+    <html lang="ar" dir="rtl" suppressHydrationWarning className={`${cairo.variable} ${tajawal.variable}`}>
+      <body className="font-tajawal antialiased" suppressHydrationWarning>
+        <ThemeProvider>
+          <AuthProvider>
+            <GuideProvider>
+              {children}
+              <Toaster />
+            </GuideProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

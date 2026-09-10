@@ -8,6 +8,13 @@ import { useAuth } from '@/lib/auth-context';
 import { hasCompanyPermission, hasPermission } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import { COMPANY_ROLE_LABELS } from '@/lib/types';
+import { GuideIndicator } from '@/components/guide-indicator';
+
+const GUIDE_TIPS: Record<string, string> = {
+  '/payroll': 'حساب مؤتمت بالكامل للراتب الأساسي، البدلات، والخصومات مع دعم تصدير ملفات Excel ومسيرات البنوك.',
+  '/attendance': 'تتبع ذكي يومي مدعوم بخاصية استيراد سجلات أجهزة البصمة مباشرة لمنع التلاعب والأخطاء.',
+  '/contracts': 'أرشفة سحابية مشفرة وآمنة لجميع وثائق الموظفين (عقود، هويات، شهادات) مع إدارة فورية.',
+};
 
 export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; className?: string }) {
   const pathname = usePathname();
@@ -61,7 +68,10 @@ export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; cl
                   )}
                 >
                   <Icon className={cn('h-[18px] w-[18px] shrink-0 transition-transform duration-200', active ? 'scale-110' : 'group-hover:scale-105')} />
-                  <span>{item.title}</span>
+                  <span className="flex-1">{item.title}</span>
+                  {GUIDE_TIPS[item.href] && (
+                    <GuideIndicator text={GUIDE_TIPS[item.href]} side="left" />
+                  )}
                 </Link>
               </li>
             );

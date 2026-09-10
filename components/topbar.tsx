@@ -3,11 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Bell, Menu, MoonStar, Search, Sun, LogOut, User as UserIcon } from 'lucide-react';
+import { Bell, Menu, MoonStar, Search, Sun, LogOut, User as UserIcon, Sparkles } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/lib/auth-context';
+import { useGuide } from '@/lib/guide-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +27,7 @@ import type { Notification } from '@/lib/types';
 export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const { theme, setTheme } = useTheme();
   const { user, role, company, companyRole, signOut } = useAuth();
+  const { guideEnabled, toggleGuide } = useGuide();
   const router = useRouter();
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
@@ -64,6 +67,31 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2 sm:flex-none">
+        <Button
+          variant={guideEnabled ? 'default' : 'ghost'}
+          size="sm"
+          onClick={toggleGuide}
+          className={cn(
+            'hidden items-center gap-1.5 text-xs transition-all duration-300 sm:flex',
+            guideEnabled && 'bg-accent text-accent-foreground hover:bg-accent/90 shadow-sm shadow-accent/30'
+          )}
+          aria-label="تشغيل/إيقاف دليل النظام"
+          title={guideEnabled ? 'إيقاف دليل النظام' : 'تشغيل دليل النظام'}
+        >
+          <Sparkles className={cn('h-4 w-4 transition-transform duration-300', guideEnabled && 'scale-110')} />
+          <span className="hidden md:inline">{guideEnabled ? 'إيقاف الدليل' : 'تشغيل الدليل'}</span>
+        </Button>
+
+        <Button
+          variant={guideEnabled ? 'default' : 'ghost'}
+          size="icon"
+          onClick={toggleGuide}
+          className={cn('sm:hidden', guideEnabled && 'bg-accent text-accent-foreground hover:bg-accent/90')}
+          aria-label="تشغيل/إيقاف دليل النظام"
+        >
+          <Sparkles className={cn('h-4 w-4 transition-transform duration-300', guideEnabled && 'scale-110')} />
+        </Button>
+
         {mounted && (
           <Button
             variant="ghost"
