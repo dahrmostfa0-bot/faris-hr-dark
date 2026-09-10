@@ -2,24 +2,17 @@
 import LandingNavbar from "@/components/landing/Navbar";
 import Hero from "@/components/landing/Hero";
 import ProblemSection from "@/components/landing/ProblemSection";
-import SolutionSection from "@/components/landing/SolutionSection";
 import DashboardPreview from "@/components/landing/DashboardPreview";
 import FeaturesSection from "@/components/landing/FeaturesSection";
-import ValueSection from "@/components/landing/ValueSection";
-import CostSection from "@/components/landing/CostSection";
-import SectorsSection from "@/components/landing/SectorsSection";
-import SchoolsSection from "@/components/landing/SchoolsSection";
-import RolesSection from "@/components/landing/RolesSection";
-import BeforeAfter from "@/components/landing/BeforeAfter";
 import HowItWorks from "@/components/landing/HowItWorks";
-import NoPressure from "@/components/landing/NoPressure";
+import ValueSection from "@/components/landing/ValueSection";
+import SolutionSection from "@/components/landing/SolutionSection";
+import CostSection from "@/components/landing/CostSection";
+import BeforeAfter from "@/components/landing/BeforeAfter";
 import WhyFaris from "@/components/landing/WhyFaris";
-import SecuritySection from "@/components/landing/SecuritySection";
-import Objections from "@/components/landing/Objections";
-import FAQ from "@/components/landing/FAQ";
-import FinalCTA from "@/components/landing/FinalCTA";
-import DemoForm from "@/components/landing/DemoForm";
+import NoPressure from "@/components/landing/NoPressure";
 import Footer from "@/components/landing/Footer";
+import MobileCTA from "@/components/landing/MobileCTA";
 
 export const metadata: Metadata = {
   title: "فارس دحروج الذكي | نظام إدارة الموارد البشرية للمدارس والشركات والمؤسسات",
@@ -58,25 +51,18 @@ export default function LandingPage() {
       <main>
         <Hero />
         <ProblemSection />
-        <SolutionSection />
         <DashboardPreview />
         <FeaturesSection />
-        <ValueSection />
-        <CostSection />
-        <SectorsSection />
-        <SchoolsSection />
-        <RolesSection />
-        <BeforeAfter />
         <HowItWorks />
-        <NoPressure />
+        <ValueSection />
+        <SolutionSection />
+        <CostSection />
+        <BeforeAfter />
         <WhyFaris />
-        <SecuritySection />
-        <Objections />
-        <FAQ />
-        <FinalCTA />
-        <DemoForm />
+        <NoPressure />
       </main>
       <Footer />
+      <MobileCTA />
     </div>
   );
 }
