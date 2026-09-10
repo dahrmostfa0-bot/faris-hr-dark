@@ -1,68 +1,72 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+ import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
-
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const { company_name, email, phone, organization_type } = body;
+    const body = await request.json();
 
-    if (!company_name || !email || !phone) {
+    const { org_name, contact_name, email, phone, org_type } = body;
+
+    // ✅ تحقق من جانب الخادم
+    if (
+      !org_name?.trim() ||
+      !contact_name?.trim() ||
+      !email?.trim() ||
+      !phone?.trim() ||
+      !org_type?.trim()
+    ) {
       return NextResponse.json(
-        { error: 'اسم الشركة والبريد الإلكتروني ورقم الهاتف مطلوبة' },
+        { error: "يرجى ملء جميع الحقول المطلوبة." },
         { status: 400 }
       );
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return NextResponse.json(
-        { error: 'البريد الإلكتروني غير صالح' },
+        { error: "البريد الإلكتروني غير صحيح." },
         { status: 400 }
       );
     }
 
+    // ✅ الأعمدة مطابقة تمامًا لجدول demo_requests الفعلي
     const { data, error } = await supabase
-      .from('demo_requests')
+      .from("demo_requests")
       .insert({
-        company_name: String(company_name).trim(),
-        email: String(email).trim(),
-        phone: String(phone).trim(),
-        organization_type: organization_type ? String(organization_type).trim() : 'school',
-        status: 'pending',
+        org_name: org_name.trim(),
+        contact_name: contact_name.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
+        org_type: org_type.trim(),
+        employee_count: body.employee_count ? Number(body.employee_count) : null,
+        branches_count: body.branches_count ? Number(body.branches_count) : null,
+        message: body.message?.trim() || null,
       })
-      .select('id, created_at')
-      .single();
+      .select();
 
+    // ✅ فحص خطأ الإدراج إلزامي — لا نجاح وهمي
     if (error) {
-      console.error('Demo request insert error:', error.message);
+      console.error("❌ Supabase insert error:", error.message, error.details);
       return NextResponse.json(
-        { error: 'حدث خطأ أثناء إرسال الطلب. يرجى المحاولة مرة أخرى.' },
+        { error: "تعذر حفظ الطلب حاليًا. يرجى المحاولة مرة أخرى." },
         { status: 500 }
       );
     }
 
+    console.log("✅ تم إدراج الطلب بنجاح، المعرف:", data?.[0]?.id);
     return NextResponse.json(
-      { success: true, message: 'تم استلام طلبك بنجاح. سنتواصل معك قريباً.', id: data.id },
+      { ok: true, id: data?.[0]?.id },
       { status: 201 }
     );
-  } catch {
+  } catch (err) {
+    console.error("💥 خطأ غير متوقع:", err);
     return NextResponse.json(
-      { error: 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.' },
+      { error: "حدث خطأ غير متوقع في الخادم. يرجى المحاولة مرة أخرى." },
       { status: 500 }
     );
   }
-}
-
-export async function GET() {
-  return NextResponse.json(
-    { error: 'الطريقة غير مدعومة' },
-    { status: 405 }
-  );
 }
