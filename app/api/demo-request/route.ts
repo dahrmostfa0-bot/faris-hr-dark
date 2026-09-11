@@ -12,7 +12,6 @@ export async function POST(request: Request) {
 
     const { org_name, contact_name, email, phone, org_type } = body;
 
-    // ✅ تحقق من جانب الخادم
     if (
       !org_name?.trim() ||
       !contact_name?.trim() ||
@@ -33,39 +32,33 @@ export async function POST(request: Request) {
       );
     }
 
-    // ✅ الأعمدة مطابقة تمامًا لجدول demo_requests الفعلي
-    const { data, error } = await supabase
-      .from("demo_requests")
-      .insert({
-        org_name: org_name.trim(),
-        contact_name: contact_name.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        org_type: org_type.trim(),
-        employee_count: body.employee_count ? Number(body.employee_count) : null,
-        branches_count: body.branches_count ? Number(body.branches_count) : null,
-        message: body.message?.trim() || null,
-      })
-      .select();
+    // ✅ إدراج بدون .select() — لا يحتاج سوى سياسة INSERT الموجودة
+    const { error } = await supabase.from("demo_requests").insert({
+      org_name: org_name.trim(),
+      contact_name: contact_name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone.trim(),
+      org_type: org_type.trim(),
+      employee_count: body.employee_count ? Number(body.employee_count) : null,
+      branches_count: body.branches_count ? Number(body.branches_count) : null,
+      message: body.message?.trim() || null,
+    });
 
-    // ✅ فحص خطأ الإدراج إلزامي — لا نجاح وهمي
     if (error) {
-      console.error("❌ Supabase insert error:", error.message, error.details);
+      console.error("Supabase insert error:", error.message);
+      // 🔍 رسالة تشخيصية مؤقتة تكشف السبب الحقيقي في الواجهة
+      // بعد نجاح الاختبار: أعد استبدالها بـ "تعذر حفظ الطلب حاليًا. يرجى المحاولة مرة أخرى."
       return NextResponse.json(
-        { error: "تعذر حفظ الطلب حاليًا. يرجى المحاولة مرة أخرى." },
+        { error: `تعذر الحفظ: ${error.message}` },
         { status: 500 }
       );
     }
 
-    console.log("✅ تم إدراج الطلب بنجاح، المعرف:", data?.[0]?.id);
-    return NextResponse.json(
-      { ok: true, id: data?.[0]?.id },
-      { status: 201 }
-    );
+    return NextResponse.json({ ok: true }, { status: 201 });
   } catch (err) {
-    console.error("💥 خطأ غير متوقع:", err);
+    console.error("Unexpected error:", err);
     return NextResponse.json(
-      { error: "حدث خطأ غير متوقع في الخادم. يرجى المحاولة مرة أخرى." },
+      { error: "حدث خطأ غير متوقع في الخادم." },
       { status: 500 }
     );
   }
