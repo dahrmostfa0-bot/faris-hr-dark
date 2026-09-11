@@ -9,3 +9,7 @@ CREATE TABLE IF NOT EXISTS public.demo_requests (
   branches_count INTEGER,
   message TEXT
 );
+ALTER TABLE public.demo_requests 
+ADD COLUMN IF NOT EXISTS employee_count INTEGER,
+ADD COLUMN IF NOT EXISTS branches_count INTEGER,
+ADD COLUMN IF NOT EXISTS message TEXT;
