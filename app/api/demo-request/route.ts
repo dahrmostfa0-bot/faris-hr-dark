@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // ✅ إدراج بدون .select() — لا يحتاج سوى سياسة INSERT الموجودة
+    // الإدراج لا يحتاج سوى سياسة INSERT الموجودة على الجدول
     const { error } = await supabase.from("demo_requests").insert({
       org_name: org_name.trim(),
       contact_name: contact_name.trim(),
@@ -46,8 +46,6 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error("Supabase insert error:", error.message);
-      // 🔍 رسالة تشخيصية مؤقتة تكشف السبب الحقيقي في الواجهة
-      // بعد نجاح الاختبار: أعد استبدالها بـ "تعذر حفظ الطلب حاليًا. يرجى المحاولة مرة أخرى."
       return NextResponse.json(
         { error: "تعذر حفظ الطلب حاليًا. يرجى المحاولة مرة أخرى." },
         { status: 500 }
