@@ -53,11 +53,8 @@ export default function Footer() {
                   طلب نسخة تجريبية
                 </a>
               </li>
-              <li>
-                <a href="/login" className="hover:text-white transition-colors">
-                  تسجيل الدخول
-                </a>
-              </li>
+         
+              
             </ul>
           </div>
         </div>
