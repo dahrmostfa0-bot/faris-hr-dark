@@ -48,13 +48,11 @@ export default function Footer() {
           <div>
             <h3 className="text-sm font-bold text-white mb-4">تواصل معنا</h3>
             <ul className="space-y-2.5 text-sm text-slate-400">
-              <li>
+              
                 <a href="#demo-form" className="hover:text-white transition-colors">
                   طلب نسخة تجريبية
                 </a>
-              </li>
-         
-              
+  
             </ul>
           </div>
         </div>
