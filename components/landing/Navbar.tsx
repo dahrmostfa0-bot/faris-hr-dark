@@ -1,4 +1,4 @@
-"use client";
+ "use client";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -65,7 +65,6 @@ export default function Navbar() {
 
         {/* Desktop Actions */}
         <div className="hidden lg:flex items-center gap-3">
-         
           <a
             href="#demo-form"
             className="inline-flex items-center gap-1.5 bg-indigo-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20"
@@ -109,6 +108,7 @@ export default function Navbar() {
               href="#demo-form"
               onClick={() => setMobileOpen(false)}
               className="block text-center px-4 py-3 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            >
               طلب نسخة تجريبية
             </a>
           </div>
