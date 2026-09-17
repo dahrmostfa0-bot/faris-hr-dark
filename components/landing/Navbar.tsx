@@ -105,12 +105,10 @@ export default function Navbar() {
             </a>
           ))}
           <div className="pt-3 border-t border-slate-100 mt-3 space-y-2">
-           >
             <a
               href="#demo-form"
               onClick={() => setMobileOpen(false)}
               className="block text-center px-4 py-3 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-            >
               طلب نسخة تجريبية
             </a>
           </div>
