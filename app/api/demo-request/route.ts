@@ -5,31 +5,23 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-<<<<<<< HEAD
-// ─────────────────────────────────────────────
-// إشعار صاحب المنصة عند وصول طلب جديد
-// حاليًا: تسجيل واضح + جاهزية لربط بريد حقيقي
-// مستقبلًا: يُستبدل بنداء Resend/SMTP دون تغيير شيئًا آخر
-// ─────────────────────────────────────────────
+
 async function notifyNewRequest(body: Record<string, unknown>) {
   const line = [
-    '📬 طلب نسخة تجريبية جديد!',
+    "📬 طلب نسخة تجريبية جديد!",
     `الشركة: ${body.org_name}`,
     `المسؤول: ${body.contact_name}`,
     `النوع: ${body.org_type}`,
     `البريد: ${body.email}`,
     `الهاتف/واتساب: ${body.phone}`,
-    `الرسالة: ${body.message || '—'}`,
-  ].join('\n');
+    `الرسالة: ${body.message || "—"}`,
+  ].join("\n");
 
-  console.log('═════ NEW DEMO REQUEST ═════');
+  console.log("═════ NEW DEMO REQUEST ═════");
   console.log(line);
-  console.log('═════════════════════════════');
-  // مكان الربط المستقبلي بخدمة البريد
+  console.log("═════════════════════════════");
 }
-=======
 
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -56,7 +48,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // الإدراج لا يحتاج سوى سياسة INSERT الموجودة على الجدول
     const { error } = await supabase.from("demo_requests").insert({
       org_name: org_name.trim(),
       contact_name: contact_name.trim(),
@@ -75,17 +66,11 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
-<<<<<<< HEAD
-await notifyNewRequest(body);
-return NextResponse.json({ ok: true }, { status: 201 });
 
-
-   } catch (err) {
-=======
+    await notifyNewRequest(body);
 
     return NextResponse.json({ ok: true }, { status: 201 });
   } catch (err) {
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
     console.error("Unexpected error:", err);
     return NextResponse.json(
       { error: "حدث خطأ غير متوقع في الخادم." },
