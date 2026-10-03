@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
@@ -28,14 +28,8 @@ export function useEmployees() {
     setLoading(true);
     try {
       const [empRes, depRes, posRes, brRes] = await Promise.all([
-<<<<<<< HEAD
-                supabase.from('employees').select('*, department:departments!employees_department_id_fkey(*), position:positions(*), branch:branches(*)'),
-
-         supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
-=======
-        supabase.from('employees').select('*, department:departments(*), position:positions(*), branch:branches(*), manager:employees!manager_id(*)').eq('company_id', company.id).order('created_at', { ascending: false }),
+        supabase.from('employees').select('*, department:departments!employees_department_id_fkey(*), position:positions(*), branch:branches(*), manager:employees!manager_id(*)').eq('company_id', company.id).order('created_at', { ascending: false }),
         supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
         supabase.from('positions').select('*').eq('company_id', company.id).order('title'),
         supabase.from('branches').select('*').eq('company_id', company.id).order('name'),
       ]);
