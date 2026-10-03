@@ -16,8 +16,10 @@ import {
   UserPlus,
   Target,
   ShieldAlert,
+  Inbox, // <-- تم إضافة أيقونة الطلبات هنا بنجاح
 } from 'lucide-react';
-import type { Permission } from '@/lib/permissions';
+import type { Permission } from '@lib/permissions';
+
 
 export interface NavItem {
   title: string;
@@ -29,6 +31,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { title: 'لوحة التحكم', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
   { title: 'الموظفون', href: '/employees', icon: Users, permission: 'employees.view' },
+  { title: 'الطلبات', href: '/requests', icon: Inbox, permission: 'dashboard.view' },
   { title: 'الحضور والانصراف', href: '/attendance', icon: Clock, permission: 'attendance.view' },
   { title: 'الإجازات', href: '/leaves', icon: CalendarDays, permission: 'leaves.view' },
   { title: 'الرواتب', href: '/payroll', icon: Wallet, permission: 'payroll.view' },

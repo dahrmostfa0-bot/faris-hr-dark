@@ -1,10 +1,11 @@
-import './globals.css';
+ import './globals.css';
 import type { Metadata } from 'next';
 import { Cairo, Tajawal } from 'next/font/google';
 import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/lib/auth-context';
 import { GuideProvider } from '@/lib/guide-context';
 import { Toaster } from '@/components/ui/toaster';
+import { Providers } from "./providers";
 
 const cairo = Cairo({ subsets: ['arabic', 'latin'], display: 'swap', variable: '--font-cairo' });
 const tajawal = Tajawal({ subsets: ['arabic', 'latin'], display: 'swap', variable: '--font-tajawal', weight: ['400', '500', '700'] });
@@ -23,12 +24,14 @@ export default function RootLayout({
     <html lang="ar" dir="rtl" suppressHydrationWarning className={`${cairo.variable} ${tajawal.variable}`}>
       <body className="font-tajawal antialiased" suppressHydrationWarning>
         <ThemeProvider>
-          <AuthProvider>
-            <GuideProvider>
-              {children}
-              <Toaster />
-            </GuideProvider>
-          </AuthProvider>
+          <Providers>
+            <AuthProvider>
+              <GuideProvider>
+                {children}
+                <Toaster />
+              </GuideProvider>
+            </AuthProvider>
+          </Providers>
         </ThemeProvider>
       </body>
     </html>
