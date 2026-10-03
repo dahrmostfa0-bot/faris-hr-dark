@@ -1,10 +1,6 @@
-<<<<<<< HEAD
  "use client";
-=======
-  "use client";
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const links = [
@@ -69,12 +65,6 @@ export default function Navbar() {
 
         {/* Desktop Actions */}
         <div className="hidden lg:flex items-center gap-3">
-          <Link
-            href="/login"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-indigo-600 transition-colors px-3 py-2.5"
-          >
-            تسجيل الدخول
-          </Link>
           <a
             href="#demo-form"
             className="inline-flex items-center gap-1.5 bg-indigo-600 text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/20"
@@ -114,13 +104,6 @@ export default function Navbar() {
             </a>
           ))}
           <div className="pt-3 border-t border-slate-100 mt-3 space-y-2">
-            <Link
-              href="/login"
-              onClick={() => setMobileOpen(false)}
-              className="block text-center px-4 py-3 rounded-xl text-sm font-semibold text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors"
-            >
-              تسجيل الدخول
-            </Link>
             <a
               href="#demo-form"
               onClick={() => setMobileOpen(false)}
@@ -133,8 +116,4 @@ export default function Navbar() {
       )}
     </header>
   );
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
