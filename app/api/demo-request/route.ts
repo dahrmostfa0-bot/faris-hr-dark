@@ -5,6 +5,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
+<<<<<<< HEAD
 // ─────────────────────────────────────────────
 // إشعار صاحب المنصة عند وصول طلب جديد
 // حاليًا: تسجيل واضح + جاهزية لربط بريد حقيقي
@@ -26,6 +27,9 @@ async function notifyNewRequest(body: Record<string, unknown>) {
   console.log('═════════════════════════════');
   // مكان الربط المستقبلي بخدمة البريد
 }
+=======
+
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -71,11 +75,17 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+<<<<<<< HEAD
 await notifyNewRequest(body);
 return NextResponse.json({ ok: true }, { status: 201 });
 
 
    } catch (err) {
+=======
+
+    return NextResponse.json({ ok: true }, { status: 201 });
+  } catch (err) {
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
     console.error("Unexpected error:", err);
     return NextResponse.json(
       { error: "حدث خطأ غير متوقع في الخادم." },

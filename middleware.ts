@@ -1,4 +1,8 @@
+<<<<<<< HEAD
  import { NextResponse } from 'next/server';
+=======
+  import { NextResponse } from 'next/server';
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
 import type { NextRequest } from 'next/server';
 
 // ═══════════════════════════════════════════════════════════
@@ -75,4 +79,8 @@ export const config = {
     '/login/:path*',
     '/((?!_next/static|_next/image|favicon.ico|api/demo-request|expired|api/requests).*)',
   ],
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9

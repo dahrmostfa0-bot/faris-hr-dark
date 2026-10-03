@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 @layer base {
+<<<<<<< HEAD
    :root {
     --background: 210 40% 98%;
     --foreground: 222 47% 11%;
@@ -33,6 +34,38 @@
     --chart-3: 38 92% 50%;
     --chart-4: 280 65% 60%;
     --chart-5: 0 72% 50%;
+=======
+  :root {
+    --background: 250 25% 6%;
+    --foreground: 250 15% 95%;
+    --card: 250 22% 9%;
+    --card-foreground: 250 15% 95%;
+    --popover: 250 22% 9%;
+    --popover-foreground: 250 15% 95%;
+    --primary: 263 70% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 250 18% 16%;
+    --secondary-foreground: 250 15% 95%;
+    --muted: 250 18% 14%;
+    --muted-foreground: 250 10% 60%;
+    --accent: 38 95% 55%;
+    --accent-foreground: 250 25% 8%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 72% 45%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 95% 55%;
+    --warning-foreground: 250 25% 8%;
+    --border: 250 18% 18%;
+    --input: 250 18% 18%;
+    --ring: 263 70% 60%;
+    --radius: 0.85rem;
+    --chart-1: 263 70% 60%;
+    --chart-2: 142 72% 45%;
+    --chart-3: 38 95% 55%;
+    --chart-4: 280 65% 65%;
+    --chart-5: 0 72% 55%;
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
   }
 
   .dark {
@@ -162,6 +195,7 @@
   background: hsl(var(--primary) / 0.3);
   color: hsl(var(--foreground));
 }
+<<<<<<< HEAD
 /* كود تكبير متوازن ومتناسق للوحة التحكم بالكامل */
 body, html, main, section, div, p, span {
   font-size: 1.05rem !important; /* تقليل بسيط ليكون الحجم متناسقاً وليس ضخماً */
@@ -185,3 +219,5 @@ aside, nav, a, button, .nav-item {
   font-size: 1.08rem !important; /* حجم خط مثالي لبيانات الموظفين والأرقام */
   font-weight: 500 !important;
 }
+=======
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
  "use client";
+=======
+  "use client";
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
@@ -129,4 +133,8 @@ export default function Navbar() {
       )}
     </header>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
