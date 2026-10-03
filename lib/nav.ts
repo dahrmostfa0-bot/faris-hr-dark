@@ -1,4 +1,4 @@
-import {
+ import {
   LayoutDashboard,
   Users,
   Clock,
@@ -16,15 +16,9 @@ import {
   UserPlus,
   Target,
   ShieldAlert,
-<<<<<<< HEAD
-  Inbox, // <-- تم إضافة أيقونة الطلبات هنا بنجاح
-} from 'lucide-react';
-import type { Permission } from '@lib/permissions';
-
-=======
+  Inbox,
 } from 'lucide-react';
 import type { Permission } from '@/lib/permissions';
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
 
 export interface NavItem {
   title: string;
@@ -36,10 +30,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { title: 'لوحة التحكم', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
   { title: 'الموظفون', href: '/employees', icon: Users, permission: 'employees.view' },
-<<<<<<< HEAD
   { title: 'الطلبات', href: '/requests', icon: Inbox, permission: 'dashboard.view' },
-=======
->>>>>>> 625a8a03d1b9e1649a51a522adaf5ddf0b2629c9
   { title: 'الحضور والانصراف', href: '/attendance', icon: Clock, permission: 'attendance.view' },
   { title: 'الإجازات', href: '/leaves', icon: CalendarDays, permission: 'leaves.view' },
   { title: 'الرواتب', href: '/payroll', icon: Wallet, permission: 'payroll.view' },
