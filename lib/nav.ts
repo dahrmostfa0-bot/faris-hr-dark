@@ -25,14 +25,13 @@ export interface NavItem {
   href: string;
   icon: typeof LayoutDashboard;
   permission?: Permission;
+  /** يظهر فقط لصاحب المنصة (جدول platform_admins) */
+  platformOnly?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { title: 'لوحة التحكم', href: '/dashboard', icon: LayoutDashboard, permission: 'dashboard.view' },
   { title: 'الموظفون', href: '/employees', icon: Users, permission: 'employees.view' },
-    { title: 'الطلبات', href: '/requests', icon: Inbox, permission: 'dashboard.view' },
-
-  
   { title: 'الحضور والانصراف', href: '/attendance', icon: Clock, permission: 'attendance.view' },
   { title: 'الإجازات', href: '/leaves', icon: CalendarDays, permission: 'leaves.view' },
   { title: 'الرواتب', href: '/payroll', icon: Wallet, permission: 'payroll.view' },
@@ -48,4 +47,5 @@ export const NAV_ITEMS: NavItem[] = [
   { title: 'الإشعارات', href: '/notifications', icon: Bell, permission: 'notifications.view' },
   { title: 'المساعد الذكي', href: '/ai', icon: Sparkles, permission: 'ai.use' },
   { title: 'الإعدادات', href: '/settings', icon: Settings, permission: 'settings.manage' },
+  { title: 'طلبات التجربة', href: '/requests', icon: Inbox, platformOnly: true },
 ];

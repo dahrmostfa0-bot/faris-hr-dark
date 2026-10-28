@@ -1,19 +1,21 @@
-'use client';
+ 'use client';
 
 import { useAuth } from '@/lib/auth-context';
 import { EmployeeDashboard } from '@/components/employee-dashboard';
 import { AdminDashboard } from '@/components/admin-dashboard';
 
-function isEmployeeRole(role: string | null, companyRole: string | null): boolean {
-  if (companyRole) return companyRole === 'employee';
-  if (role) return role === 'employee';
-  return false;
-}
-
 export default function DashboardPage() {
-  const { role, companyRole } = useAuth();
+  const { companyRole, loading } = useAuth();
 
-  if (isEmployeeRole(role, companyRole)) {
+  if (loading) {
+    return <div className="py-12 text-center text-muted-foreground">جاري التحميل...</div>;
+  }
+
+  if (!companyRole) {
+    return <div className="py-12 text-center text-muted-foreground">لا توجد شركة مرتبطة بالحساب.</div>;
+  }
+
+  if (companyRole === 'employee') {
     return <EmployeeDashboard />;
   }
 

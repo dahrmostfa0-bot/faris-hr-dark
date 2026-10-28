@@ -17,8 +17,8 @@ export default function EditEmployeePage() {
     (async () => {
       const { data } = await supabase
         .from('employees')
-        .select('*, department:departments(*), position:positions(*), branch:branches(*), manager:employees!manager_id(*)')
-        .eq('id', params.id as string)
+        .select('*, department:departments!employees_department_id_fkey(*), position:positions(*), branch:branches(*), manager:employees!manager_id(*)')
+         .eq('id', params.id as string)
         .maybeSingle();
       setEmployee(data as Employee | null);
       setLoading(false);

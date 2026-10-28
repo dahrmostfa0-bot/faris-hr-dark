@@ -1,4 +1,4 @@
- import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
       org_type: org_type.trim(),
+      organization_type: org_type.trim(),
       employee_count: body.employee_count ? Number(body.employee_count) : null,
       branches_count: body.branches_count ? Number(body.branches_count) : null,
       message: body.message?.trim() || null,

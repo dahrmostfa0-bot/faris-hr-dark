@@ -1,5 +1,6 @@
-'use client';
+ 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Building2 } from 'lucide-react';
@@ -8,6 +9,7 @@ import { useAuth } from '@/lib/auth-context';
 import { hasCompanyPermission, hasPermission } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import { COMPANY_ROLE_LABELS } from '@/lib/types';
+import { supabase } from '@/lib/supabase/client';
 import { GuideIndicator } from '@/components/guide-indicator';
 
 const GUIDE_TIPS: Record<string, string> = {
@@ -19,8 +21,18 @@ const GUIDE_TIPS: Record<string, string> = {
 export function Sidebar({ onNavigate, className }: { onNavigate?: () => void; className?: string }) {
   const pathname = usePathname();
   const { companyRole, role, company } = useAuth();
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    supabase.rpc('am_i_platform_admin').then(({ data }) => {
+      if (alive) setIsPlatformAdmin(data === true);
+    });
+    return () => { alive = false; };
+  }, [companyRole]);
 
   const items = NAV_ITEMS.filter((item) => {
+    if (item.platformOnly) return isPlatformAdmin;
     if (!item.permission) return true;
     if (companyRole) return hasCompanyPermission(companyRole, item.permission);
     if (role) return hasPermission(role, item.permission);

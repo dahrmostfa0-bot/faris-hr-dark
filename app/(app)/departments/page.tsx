@@ -1,11 +1,10 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import { Plus, Building2, Network, GitBranch } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,13 +17,13 @@ import { Table as UITable, TableBody as UITableBody, TableCell as UITableCell, T
 import { supabase } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/permissions';
+import { hasCompanyPermission } from '@/lib/permissions';
 import type { Department, Position, Branch, Employee } from '@/lib/types';
 
 export default function DepartmentsPage() {
-  const { role } = useAuth();
+  const { company, companyRole } = useAuth();
   const { toast } = useToast();
-  const canManage = hasPermission(role ?? undefined, 'departments.manage');
+  const canManage = hasCompanyPermission(companyRole ?? undefined, 'departments.manage');
 
   const [tab, setTab] = useState('departments');
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -41,12 +40,13 @@ export default function DepartmentsPage() {
   const [brForm, setBrForm] = useState({ name: '', name_ar: '', address: '', phone: '', manager_name: '' });
 
   useEffect(() => {
+    if (!company) { setLoading(false); return; }
     (async () => {
       const [dRes, pRes, bRes, eRes] = await Promise.all([
-        supabase.from('departments').select('*').order('name'),
-        supabase.from('positions').select('*').order('title'),
-        supabase.from('branches').select('*').order('name'),
-        supabase.from('employees').select('id, full_name').order('full_name'),
+        supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
+        supabase.from('positions').select('*').eq('company_id', company.id).order('title'),
+        supabase.from('branches').select('*').eq('company_id', company.id).order('name'),
+        supabase.from('employees').select('id, full_name').eq('company_id', company.id).order('full_name'),
       ]);
       setDepartments((dRes.data ?? []) as Department[]);
       setPositions((pRes.data ?? []) as Position[]);
@@ -54,45 +54,56 @@ export default function DepartmentsPage() {
       setEmployees((eRes.data ?? []) as Employee[]);
       setLoading(false);
     })();
-  }, []);
+  }, [company]);
 
   async function addDep() {
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!depForm.name) { toast({ title: 'أدخل الاسم', variant: 'destructive' }); return; }
     const { error } = await supabase.from('departments').insert({
       name: depForm.name, name_ar: depForm.name_ar, branch_id: depForm.branch_id || null,
       manager_employee_id: depForm.manager_employee_id || null, description: depForm.description,
+      company_id: company.id,
     });
     if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
     else {
       toast({ title: 'تمت الإضافة' });
       setDepOpen(false);
-      const { data } = await supabase.from('departments').select('*').order('name');
+      setDepForm({ name: '', name_ar: '', branch_id: '', manager_employee_id: '', description: '' });
+      const { data } = await supabase.from('departments').select('*').eq('company_id', company.id).order('name');
       setDepartments((data ?? []) as Department[]);
     }
   }
 
   async function addPos() {
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!posForm.title) { toast({ title: 'أدخل المسمى', variant: 'destructive' }); return; }
     const { error } = await supabase.from('positions').insert({
       title: posForm.title, title_ar: posForm.title_ar, department_id: posForm.department_id || null, description: posForm.description,
+      company_id: company.id,
     });
     if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
     else {
       toast({ title: 'تمت الإضافة' });
       setPosOpen(false);
-      const { data } = await supabase.from('positions').select('*').order('title');
+      setPosForm({ title: '', title_ar: '', department_id: '', description: '' });
+      const { data } = await supabase.from('positions').select('*').eq('company_id', company.id).order('title');
       setPositions((data ?? []) as Position[]);
     }
   }
 
   async function addBr() {
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!brForm.name) { toast({ title: 'أدخل الاسم', variant: 'destructive' }); return; }
-    const { error } = await supabase.from('branches').insert(brForm);
+    const { error } = await supabase.from('branches').insert({
+      ...brForm,
+      company_id: company.id,
+    });
     if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
     else {
       toast({ title: 'تمت الإضافة' });
       setBrOpen(false);
-      const { data } = await supabase.from('branches').select('*').order('name');
+      setBrForm({ name: '', name_ar: '', address: '', phone: '', manager_name: '' });
+      const { data } = await supabase.from('branches').select('*').eq('company_id', company.id).order('name');
       setBranches((data ?? []) as Branch[]);
     }
   }
@@ -227,7 +238,7 @@ export default function DepartmentsPage() {
 
       {/* Dialogs */}
       <UIDialog open={depOpen} onOpenChange={setDepOpen}>
-        <UIDialogContent>
+        <UIDialogContent aria-describedby={undefined}>
           <UIDialogHeader><UIDialogTitle>قسم جديد</UIDialogTitle></UIDialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-2"><Label>الاسم (إنجليزي)</Label><Input value={depForm.name} onChange={(e) => setDepForm({ ...depForm, name: e.target.value })} /></div>
@@ -241,7 +252,7 @@ export default function DepartmentsPage() {
       </UIDialog>
 
       <UIDialog open={posOpen} onOpenChange={setPosOpen}>
-        <UIDialogContent>
+        <UIDialogContent aria-describedby={undefined}>
           <UIDialogHeader><UIDialogTitle>وظيفة جديدة</UIDialogTitle></UIDialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-2"><Label>المسمى (إنجليزي)</Label><Input value={posForm.title} onChange={(e) => setPosForm({ ...posForm, title: e.target.value })} /></div>
@@ -254,7 +265,7 @@ export default function DepartmentsPage() {
       </UIDialog>
 
       <UIDialog open={brOpen} onOpenChange={setBrOpen}>
-        <UIDialogContent>
+        <UIDialogContent aria-describedby={undefined}>
           <UIDialogHeader><UIDialogTitle>فرع جديد</UIDialogTitle></UIDialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-2"><Label>الاسم (إنجليزي)</Label><Input value={brForm.name} onChange={(e) => setBrForm({ ...brForm, name: e.target.value })} /></div>

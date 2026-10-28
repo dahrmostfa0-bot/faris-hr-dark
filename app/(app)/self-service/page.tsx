@@ -1,7 +1,7 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
-import { UserCog, Plus, Wallet, CalendarDays, Check, X } from 'lucide-react';
+import { Plus, Wallet, CalendarDays, Check, X } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,20 +24,22 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/permissions';
 import { formatDateAr, formatCurrency, daysBetween } from '@/lib/format';
 import {
   LEAVE_TYPE_LABELS, LEAVE_STATUS_LABELS, LOAN_REQUEST_STATUS_LABELS,
-  type Leave, type LeaveType, type LoanRequest, type Employee,
+  type Leave, type LeaveType, type LoanRequest,
 } from '@/lib/types';
 
-export default function SelfServicePage() {
-  const { user, role } = useAuth();
-  const { toast } = useToast();
-  const canApproveLoans = hasPermission(role ?? undefined, 'payroll.manage');
+const LEAVE_SELECT = '*, employee:employees(id, full_name)';
+const LOAN_SELECT = '*, employee:employees(id, full_name)';
 
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [myEmp, setMyEmp] = useState<Employee | null>(null);
+export default function SelfServicePage() {
+  const { user, company, companyRole } = useAuth();
+  const { toast } = useToast();
+  // الموافقة على السلف: المالك و hr_manager فقط (مطابق لسياسات قاعدة البيانات)
+  const canApproveLoans = companyRole === 'owner' || companyRole === 'hr_manager';
+
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [loanReqs, setLoanReqs] = useState<LoanRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,59 +49,82 @@ export default function SelfServicePage() {
   const [leaveForm, setLeaveForm] = useState({ type: 'annual' as LeaveType, start_date: '', end_date: '', reason: '' });
   const [loanForm, setLoanForm] = useState({ amount: 0, installments: 1, reason: '' });
 
+  async function loadLeaves(companyId: string) {
+    const { data } = await supabase
+      .from('leaves').select(LEAVE_SELECT).eq('company_id', companyId)
+      .order('created_at', { ascending: false });
+    setLeaves((data ?? []) as unknown as Leave[]);
+  }
+
+  async function loadLoans(companyId: string) {
+    const { data } = await supabase
+      .from('loan_requests').select(LOAN_SELECT).eq('company_id', companyId)
+      .order('created_at', { ascending: false });
+    setLoanReqs((data ?? []) as unknown as LoanRequest[]);
+  }
+
   useEffect(() => {
+    if (!company) { setLoading(false); return; }
     (async () => {
-      const { data: emps } = await supabase.from('employees').select('id, full_name, user_id').order('full_name');
-      setEmployees((emps ?? []) as Employee[]);
       if (user) {
-        const me = (emps ?? []).find((e: any) => e.user_id === user.id) as Employee | undefined;
-        setMyEmp(me ?? null);
+        const { data: me } = await supabase
+          .from('employees').select('id')
+          .eq('company_id', company.id).eq('user_id', user.id).maybeSingle();
+        setMyEmployeeId((me as { id: string } | null)?.id ?? null);
       }
-      const [lvRes, lrRes] = await Promise.all([
-        supabase.from('leaves').select('*, employee:employees(*)').order('created_at', { ascending: false }),
-        supabase.from('loan_requests').select('*, employee:employees(*)').order('created_at', { ascending: false }),
-      ]);
-      setLeaves((lvRes.data ?? []) as Leave[]);
-      setLoanReqs((lrRes.data ?? []) as LoanRequest[]);
+      await Promise.all([loadLeaves(company.id), loadLoans(company.id)]);
       setLoading(false);
     })();
-  }, [user]);
+  }, [company, user]);
 
   async function submitLeave() {
-    const empId = myEmp?.id ?? employees[0]?.id;
-    if (!empId || !leaveForm.start_date || !leaveForm.end_date) { toast({ title: 'أكمل البيانات', variant: 'destructive' }); return; }
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
+    if (!myEmployeeId) { toast({ title: 'حسابك غير مربوط بسجل موظف', description: 'تواصل مع الموارد البشرية', variant: 'destructive' }); return; }
+    if (!leaveForm.start_date || !leaveForm.end_date) { toast({ title: 'أكمل التواريخ', variant: 'destructive' }); return; }
+    if (leaveForm.end_date < leaveForm.start_date) { toast({ title: 'تاريخ النهاية قبل البداية', variant: 'destructive' }); return; }
     const days = daysBetween(leaveForm.start_date, leaveForm.end_date);
     const { error } = await supabase.from('leaves').insert({
-      employee_id: empId, type: leaveForm.type, start_date: leaveForm.start_date,
-      end_date: leaveForm.end_date, days, reason: leaveForm.reason, status: 'pending',
+      company_id: company.id,
+      employee_id: myEmployeeId,
+      type: leaveForm.type,
+      start_date: leaveForm.start_date,
+      end_date: leaveForm.end_date,
+      days,
+      reason: leaveForm.reason,
+      status: 'pending',
     });
-    if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-    else {
-      toast({ title: 'تم تقديم طلب الإجازة' });
-      setLeaveOpen(false);
-      const { data } = await supabase.from('leaves').select('*, employee:employees(*)').order('created_at', { ascending: false });
-      setLeaves((data ?? []) as Leave[]);
-    }
+    if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
+    toast({ title: 'تم تقديم طلب الإجازة' });
+    setLeaveOpen(false);
+    setLeaveForm({ type: 'annual', start_date: '', end_date: '', reason: '' });
+    await loadLeaves(company.id);
   }
 
   async function submitLoan() {
-    const empId = myEmp?.id ?? employees[0]?.id;
-    if (!empId || !loanForm.amount) { toast({ title: 'أكمل البيانات', variant: 'destructive' }); return; }
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
+    if (!myEmployeeId) { toast({ title: 'حسابك غير مربوط بسجل موظف', description: 'تواصل مع الموارد البشرية', variant: 'destructive' }); return; }
+    if (!loanForm.amount || loanForm.amount <= 0) { toast({ title: 'أدخل مبلغًا صحيحًا', variant: 'destructive' }); return; }
     const { error } = await supabase.from('loan_requests').insert({
-      employee_id: empId, amount: Number(loanForm.amount), installments: Number(loanForm.installments),
-      reason: loanForm.reason, status: 'pending',
+      company_id: company.id,
+      employee_id: myEmployeeId,
+      amount: Number(loanForm.amount),
+      installments: Math.max(1, Number(loanForm.installments)),
+      reason: loanForm.reason,
+      status: 'pending',
     });
-    if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-    else {
-      toast({ title: 'تم تقديم طلب السلفة' });
-      setLoanOpen(false);
-      const { data } = await supabase.from('loan_requests').select('*, employee:employees(*)').order('created_at', { ascending: false });
-      setLoanReqs((data ?? []) as LoanRequest[]);
-    }
+    if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
+    toast({ title: 'تم تقديم طلب السلفة' });
+    setLoanOpen(false);
+    setLoanForm({ amount: 0, installments: 1, reason: '' });
+    await loadLoans(company.id);
   }
 
   async function decideLoan(id: string, status: 'approved' | 'rejected') {
-    await supabase.from('loan_requests').update({ status, hr_decision: 'تم', decided_at: new Date().toISOString() }).eq('id', id);
+    const { error } = await supabase
+      .from('loan_requests')
+      .update({ status, hr_decision: 'تم', decided_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
     setLoanReqs((l) => l.map((x) => x.id === id ? { ...x, status } : x));
     toast({ title: status === 'approved' ? 'تمت الموافقة على السلفة' : 'تم رفض السلفة' });
   }
@@ -110,16 +135,23 @@ export default function SelfServicePage() {
         title="الخدمة الذاتية"
         description="تقديم طلبات الإجازات والسلف ومتابعتها"
         actions={
-          <>
-            <Button variant="outline" onClick={() => setLeaveOpen(true)}><CalendarDays className="ml-2 h-4 w-4" /> طلب إجازة</Button>
-            <Button onClick={() => setLoanOpen(true)}><Plus className="ml-2 h-4 w-4" /> طلب سلفة</Button>
-          </>
+          myEmployeeId ? (
+            <>
+              <Button variant="outline" onClick={() => setLeaveOpen(true)}><CalendarDays className="ml-2 h-4 w-4" /> طلب إجازة</Button>
+              <Button onClick={() => setLoanOpen(true)}><Plus className="ml-2 h-4 w-4" /> طلب سلفة</Button>
+            </>
+          ) : null
         }
       />
 
-      {/* Leave dialog */}
+      {!loading && !myEmployeeId && (
+        <Card><CardContent className="p-4 text-sm text-muted-foreground">
+          حسابك غير مربوط بسجل موظف، لذلك لا يمكنك تقديم طلبات من هنا. تواصل مع الموارد البشرية لربط حسابك.
+        </CardContent></Card>
+      )}
+
       <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader><DialogTitle>طلب إجازة</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2"><Label>نوع الإجازة</Label><Select value={leaveForm.type} onValueChange={(v) => setLeaveForm({ ...leaveForm, type: v as LeaveType })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(LEAVE_TYPE_LABELS) as LeaveType[]).map((t) => <SelectItem key={t} value={t}>{LEAVE_TYPE_LABELS[t]}</SelectItem>)}</SelectContent></Select></div>
@@ -130,12 +162,11 @@ export default function SelfServicePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Loan dialog */}
       <Dialog open={loanOpen} onOpenChange={setLoanOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader><DialogTitle>طلب سلفة</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-2"><Label>المبلغ</Label><Input type="number" value={loanForm.amount} onChange={(e) => setLoanForm({ ...loanForm, amount: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>المبلغ</Label><Input type="number" min={0} value={loanForm.amount} onChange={(e) => setLoanForm({ ...loanForm, amount: Number(e.target.value) })} /></div>
             <div className="space-y-2"><Label>عدد الأقساط</Label><Input type="number" min={1} value={loanForm.installments} onChange={(e) => setLoanForm({ ...loanForm, installments: Number(e.target.value) })} /></div>
             <div className="space-y-2"><Label>السبب</Label><Textarea rows={2} value={loanForm.reason} onChange={(e) => setLoanForm({ ...loanForm, reason: e.target.value })} /></div>
           </div>

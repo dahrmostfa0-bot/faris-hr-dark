@@ -1,6 +1,6 @@
-'use client';
+ 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Plus, Search, Users, Eye, Pencil, Trash2, Download, Save, Loader2 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
@@ -21,29 +21,28 @@ import {
 } from '@/components/ui/dialog';
 import { useEmployees } from '@/hooks/use-employees';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/permissions';
+import { hasCompanyPermission } from '@/lib/permissions';
 import { EMPLOYEE_STATUS_LABELS, type EmployeeStatus, type Employee } from '@/lib/types';
 import { initials } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 
-export default function EmployeesPage() {
-  const { employees, departments, positions, branches, loading, reload, usingMock, addEmployeeLocal, deleteEmployeeLocal } = useEmployees();
-  const { role, company } = useAuth();
-  const { toast } = useToast();
-  const [q, setQ] = useState('');
-  const [deptFilter, setDeptFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+function nextEmployeeCode(list: Employee[]) {
+  const max = list.reduce((m, e) => {
+    const n = parseInt((e.employee_code?.match(/(\d+)$/) ?? [])[1] ?? '0', 10);
+    return n > m ? n : m;
+  }, 0);
+  return `EMP-${String(max + 1).padStart(4, '0')}`;
+}
 
-  const canCreate = hasPermission(role ?? undefined, 'employees.create');
-  const canEdit = hasPermission(role ?? undefined, 'employees.edit');
-  const canDelete = hasPermission(role ?? undefined, 'employees.delete');
+function csvCell(v: string) {
+  const s = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return `"${s.replace(/"/g, '""')}"`;
+}
 
-  // Add-employee modal state
-  const [addOpen, setAddOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    employee_code: '',
+function emptyForm(code: string) {
+  return {
+    employee_code: code,
     full_name: '',
     national_id: '',
     phone: '',
@@ -60,77 +59,77 @@ export default function EmployeesPage() {
     allowances: 0,
     bank_account: '',
     status: 'active' as EmployeeStatus,
-  });
+  };
+}
+
+export default function EmployeesPage() {
+  const { employees, departments, positions, branches, loading, error, reload, canSeeSensitive } = useEmployees();
+  const { company, companyRole } = useAuth();
+  const { toast } = useToast();
+  const [q, setQ] = useState('');
+  const [deptFilter, setDeptFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  const role = companyRole ?? undefined;
+  const canCreate = hasCompanyPermission(role, 'employees.create');
+  const canEdit = hasCompanyPermission(role, 'employees.edit');
+  const canDelete = hasCompanyPermission(role, 'employees.delete');
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState(emptyForm('EMP-0001'));
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
   function openAddModal() {
-    const nextCode = `EMP-${1000 + employees.length + Math.floor(Math.random() * 100)}`;
-    setForm({
-      employee_code: nextCode,
-      full_name: '',
-      national_id: '',
-      phone: '',
-      email: '',
-      address: '',
-      birth_date: '',
-      marital_status: '',
-      qualification: '',
-      department_id: '',
-      position_id: '',
-      branch_id: '',
-      hire_date: new Date().toISOString().slice(0, 10),
-      basic_salary: 0,
-      allowances: 0,
-      bank_account: '',
-      status: 'active',
-    });
+    setForm(emptyForm(nextEmployeeCode(employees)));
     setAddOpen(true);
   }
 
   async function handleAddSubmit() {
-    if (!form.employee_code || !form.full_name) {
+    if (!company) {
+      toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' });
+      return;
+    }
+    if (!form.employee_code.trim() || !form.full_name.trim() || !form.hire_date) {
       toast({ title: 'أكمل البيانات المطلوبة', variant: 'destructive' });
       return;
     }
     setSaving(true);
-    const payload = {
-      ...form,
-      basic_salary: Number(form.basic_salary) || 0,
-      allowances: Number(form.allowances) || 0,
+    const payload: Record<string, unknown> = {
+      company_id: company.id,
+      employee_code: form.employee_code.trim(),
+      full_name: form.full_name.trim(),
+      phone: form.phone || null,
+      email: form.email || null,
+      address: form.address || null,
+      birth_date: form.birth_date || null,
+      marital_status: form.marital_status || null,
+      qualification: form.qualification || null,
       department_id: form.department_id || null,
       position_id: form.position_id || null,
       branch_id: form.branch_id || null,
-      birth_date: form.birth_date || null,
-      company_id: company?.id ?? null,
+      hire_date: form.hire_date,
+      status: form.status,
     };
+    if (canSeeSensitive) {
+      payload.national_id = form.national_id || null;
+      payload.basic_salary = Number(form.basic_salary) || 0;
+      payload.allowances = Number(form.allowances) || 0;
+      payload.bank_account = form.bank_account || null;
+    }
 
-    // Mock mode: add to local state directly
-    if (!company || usingMock) {
-      const dept = departments.find((d) => d.id === form.department_id);
-      const newEmp: Employee = {
-        id: `local-${Date.now()}`,
-        ...payload,
-        department: dept,
-      } as Employee;
-      addEmployeeLocal(newEmp);
-      toast({ title: 'تمت الإضافة', description: 'تم إضافة الموظف بنجاح' });
-      setAddOpen(false);
-      setSaving(false);
+    const { error: insErr } = await supabase.from('employees').insert(payload);
+    setSaving(false);
+    if (insErr) {
+      toast({ title: 'خطأ', description: insErr.message, variant: 'destructive' });
       return;
     }
-
-    const { data, error } = await supabase.from('employees').insert(payload).select('*, department:departments(*), position:positions(*), branch:branches(*)').single();
-    if (error) {
-      toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-    } else {
-      addEmployeeLocal(data as Employee);
-      toast({ title: 'تمت الإضافة', description: 'تم إضافة الموظف بنجاح' });
-      setAddOpen(false);
-    }
-    setSaving(false);
+    toast({ title: 'تمت الإضافة', description: 'تم إضافة الموظف بنجاح' });
+    setAddOpen(false);
+    await reload();
   }
 
   const filtered = useMemo(() => {
@@ -143,26 +142,22 @@ export default function EmployeesPage() {
   }, [employees, q, deptFilter, statusFilter]);
 
   async function handleDelete(id: string) {
-    if (!confirm('هل أنت متأكد من حذف هذا الموظف؟')) return;
-    if (!company || usingMock) {
-      deleteEmployeeLocal(id);
-      toast({ title: 'تم الحذف', description: 'تم حذف الموظف' });
-      return;
-    }
-    const { error } = await supabase.from('employees').delete().eq('id', id);
-    if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-    else { toast({ title: 'تم الحذف', description: 'تم حذف الموظف' }); reload(); }
+    if (!confirm('حذف الموظف نهائيًا قد يحذف بياناته المرتبطة (حضور، رواتب، عقود). الأفضل تغيير حالته إلى "منتهي". هل تريد الحذف؟')) return;
+    const { error: delErr } = await supabase.from('employees').delete().eq('id', id);
+    if (delErr) { toast({ title: 'خطأ', description: delErr.message, variant: 'destructive' }); return; }
+    toast({ title: 'تم الحذف', description: 'تم حذف الموظف' });
+    await reload();
   }
 
   function exportCsv() {
-    const rows = [['الرقم الوظيفي', 'الاسم', 'البريد', 'الهاتف', 'القسم', 'الوظيفة', 'الحالة']];
+    const rows: string[][] = [['الرقم الوظيفي', 'الاسم', 'البريد', 'الهاتف', 'القسم', 'الوظيفة', 'الحالة']];
     filtered.forEach((e) => rows.push([
       e.employee_code, e.full_name, e.email ?? '', e.phone ?? '',
       e.department?.name_ar ?? e.department?.name ?? '',
       e.position?.title_ar ?? e.position?.title ?? '',
       EMPLOYEE_STATUS_LABELS[e.status as EmployeeStatus] ?? e.status,
     ]));
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+    const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -177,7 +172,6 @@ export default function EmployeesPage() {
         description={`${filtered.length} موظف`}
         actions={
           <>
-            {usingMock && <Badge variant="warning" className="text-xs">بيانات تجريبية</Badge>}
             <Button variant="outline" onClick={exportCsv}><Download className="ml-2 h-4 w-4" /> تصدير CSV</Button>
             {canCreate && (
               <Button onClick={openAddModal}><Plus className="ml-2 h-4 w-4" /> إضافة موظف</Button>
@@ -186,9 +180,12 @@ export default function EmployeesPage() {
         }
       />
 
-      {/* Add Employee Modal */}
+      {error && (
+        <Card><CardContent className="p-4 text-sm text-destructive">تعذّر تحميل بيانات الموظفين: {error}</CardContent></Card>
+      )}
+
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>إضافة موظف جديد</DialogTitle>
           </DialogHeader>
@@ -201,10 +198,12 @@ export default function EmployeesPage() {
               <Label>الاسم الكامل *</Label>
               <Input value={form.full_name} onChange={(e) => setField('full_name', e.target.value)} required />
             </div>
-            <div className="space-y-2">
-              <Label>الرقم القومي</Label>
-              <Input value={form.national_id} onChange={(e) => setField('national_id', e.target.value)} />
-            </div>
+            {canSeeSensitive && (
+              <div className="space-y-2">
+                <Label>الرقم القومي</Label>
+                <Input value={form.national_id} onChange={(e) => setField('national_id', e.target.value)} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>الهاتف</Label>
               <Input value={form.phone} onChange={(e) => setField('phone', e.target.value)} />
@@ -268,18 +267,22 @@ export default function EmployeesPage() {
               <Label>تاريخ التعيين *</Label>
               <Input type="date" value={form.hire_date} onChange={(e) => setField('hire_date', e.target.value)} required />
             </div>
-            <div className="space-y-2">
-              <Label>الراتب الأساسي</Label>
-              <Input type="number" value={form.basic_salary} onChange={(e) => setField('basic_salary', Number(e.target.value))} />
-            </div>
-            <div className="space-y-2">
-              <Label>البدلات</Label>
-              <Input type="number" value={form.allowances} onChange={(e) => setField('allowances', Number(e.target.value))} />
-            </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label>رقم الحساب البنكي</Label>
-              <Input value={form.bank_account} onChange={(e) => setField('bank_account', e.target.value)} />
-            </div>
+            {canSeeSensitive && (
+              <>
+                <div className="space-y-2">
+                  <Label>الراتب الأساسي</Label>
+                  <Input type="number" min={0} value={form.basic_salary} onChange={(e) => setField('basic_salary', Number(e.target.value))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>البدلات</Label>
+                  <Input type="number" min={0} value={form.allowances} onChange={(e) => setField('allowances', Number(e.target.value))} />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label>رقم الحساب البنكي</Label>
+                  <Input value={form.bank_account} onChange={(e) => setField('bank_account', e.target.value)} />
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>إلغاء</Button>
@@ -349,7 +352,7 @@ export default function EmployeesPage() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-9 w-9">
-                            {e.photo_url ? null : <AvatarFallback className="bg-primary/10 text-primary text-xs">{initials(e.full_name)}</AvatarFallback>}
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs">{initials(e.full_name)}</AvatarFallback>
                           </Avatar>
                           <span className="font-medium">{e.full_name}</span>
                         </div>

@@ -4,47 +4,50 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/lib/auth-context';
 import type { Employee, Department, Position, Branch } from '@/lib/types';
-import { MOCK_EMPLOYEES, MOCK_DEPARTMENTS } from '@/lib/mock-data';
+
+// أعمدة غير حساسة (بدون الراتب والبدلات والحساب البنكي والرقم القومي)
+const SAFE_COLUMNS =
+  'id, company_id, user_id, employee_code, full_name, email, phone, hire_date, status, department_id, position_id, branch_id, manager_id, created_at';
+
+const RELATIONS =
+  'department:departments!employees_department_id_fkey(*), position:positions(*), branch:branches(*), manager:employees!manager_id(id, full_name, employee_code)';
 
 export function useEmployees() {
-  const { company } = useAuth();
+  const { company, companyRole, loading: authLoading } = useAuth();
+  // المالك و hr_manager فقط يحمّلون البيانات المالية والهوية
+  const canSeeSensitive = companyRole === 'owner' || companyRole === 'hr_manager';
+
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
-  const [usingMock, setUsingMock] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (authLoading) { setLoading(true); return; }
     if (!company) {
-      setEmployees(MOCK_EMPLOYEES);
-      setDepartments(MOCK_DEPARTMENTS);
-      setPositions([]);
-      setBranches([]);
-      setUsingMock(true);
+      setEmployees([]); setDepartments([]); setPositions([]); setBranches([]);
+      setError(null);
       setLoading(false);
       return;
     }
     setLoading(true);
-    try {
-      const [empRes, depRes, posRes, brRes] = await Promise.all([
-        supabase.from('employees').select('*, department:departments!employees_department_id_fkey(*), position:positions(*), branch:branches(*), manager:employees!manager_id(*)').eq('company_id', company.id).order('created_at', { ascending: false }),
-        supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
-        supabase.from('positions').select('*').eq('company_id', company.id).order('title'),
-        supabase.from('branches').select('*').eq('company_id', company.id).order('name'),
-      ]);
-      setEmployees((empRes.data ?? []) as Employee[]);
-      setDepartments((depRes.data ?? []) as Department[]);
-      setPositions((posRes.data ?? []) as Position[]);
-      setBranches((brRes.data ?? []) as Branch[]);
-      setUsingMock(false);
-    } catch {
-      setEmployees(MOCK_EMPLOYEES);
-      setDepartments(MOCK_DEPARTMENTS);
-      setUsingMock(true);
-    }
+    setError(null);
+    const columns = canSeeSensitive ? '*' : SAFE_COLUMNS;
+    const [empRes, depRes, posRes, brRes] = await Promise.all([
+      supabase.from('employees').select(`${columns}, ${RELATIONS}`).eq('company_id', company.id).order('created_at', { ascending: false }),
+      supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
+      supabase.from('positions').select('*').eq('company_id', company.id).order('title'),
+      supabase.from('branches').select('*').eq('company_id', company.id).order('name'),
+    ]);
+    if (empRes.error) setError(empRes.error.message);
+    setEmployees((empRes.data ?? []) as unknown as Employee[]);
+    setDepartments((depRes.data ?? []) as Department[]);
+    setPositions((posRes.data ?? []) as Position[]);
+    setBranches((brRes.data ?? []) as Branch[]);
     setLoading(false);
-  }, [company]);
+  }, [company, authLoading, canSeeSensitive]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -60,5 +63,11 @@ export function useEmployees() {
     setEmployees((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   }, []);
 
-  return { employees, departments, positions, branches, loading, reload: load, usingMock, addEmployeeLocal, deleteEmployeeLocal, updateEmployeeLocal };
+  return {
+    employees, departments, positions, branches,
+    loading, error, reload: load,
+    usingMock: false,
+    canSeeSensitive,
+    addEmployeeLocal, deleteEmployeeLocal, updateEmployeeLocal,
+  };
 }

@@ -1,11 +1,10 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import { Plus, Star } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,49 +20,83 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/permissions';
+import { hasCompanyPermission } from '@/lib/permissions';
 import { formatDateAr } from '@/lib/format';
 import type { PerformanceReview, Employee } from '@/lib/types';
 
+const REVIEW_SELECT = '*, employee:employees!employee_id(id, full_name)';
+
+function emptyForm() {
+  return {
+    employee_id: '',
+    period: String(new Date().getFullYear()),
+    review_date: new Date().toISOString().slice(0, 10),
+    rating: 3,
+    goals: '',
+    strengths: '',
+    weaknesses: '',
+    recommendations: '',
+  };
+}
+
 export default function ReviewsPage() {
-  const { role } = useAuth();
+  const { user, company, companyRole } = useAuth();
   const { toast } = useToast();
-  const canManage = hasPermission(role ?? undefined, 'reviews.manage');
+  const canManage = hasCompanyPermission(companyRole ?? undefined, 'reviews.manage');
 
   const [reviews, setReviews] = useState<PerformanceReview[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    employee_id: '', period: String(new Date().getFullYear()), review_date: new Date().toISOString().slice(0, 10),
-    rating: 3, goals: '', strengths: '', weaknesses: '', recommendations: '',
-  });
+  const [form, setForm] = useState(emptyForm());
+
+  async function loadReviews(companyId: string) {
+    const { data } = await supabase
+      .from('performance_reviews')
+      .select(REVIEW_SELECT)
+      .eq('company_id', companyId)
+      .order('review_date', { ascending: false });
+    setReviews((data ?? []) as unknown as PerformanceReview[]);
+  }
 
   useEffect(() => {
+    if (!company) { setLoading(false); return; }
     (async () => {
-      const [rRes, empRes] = await Promise.all([
-        supabase.from('performance_reviews').select('*, employee:employees(*)').order('review_date', { ascending: false }),
-        supabase.from('employees').select('id, full_name').order('full_name'),
+      const [empRes, meRes] = await Promise.all([
+        supabase.from('employees').select('id, full_name').eq('company_id', company.id).order('full_name'),
+        user
+          ? supabase.from('employees').select('id').eq('company_id', company.id).eq('user_id', user.id).maybeSingle()
+          : Promise.resolve({ data: null }),
       ]);
-      setReviews((rRes.data ?? []) as PerformanceReview[]);
       setEmployees((empRes.data ?? []) as Employee[]);
+      setMyEmployeeId((meRes.data as { id: string } | null)?.id ?? null);
+      await loadReviews(company.id);
       setLoading(false);
     })();
-  }, []);
+  }, [company, user]);
 
   async function handleSubmit() {
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!form.employee_id) { toast({ title: 'اختر موظف', variant: 'destructive' }); return; }
     const { error } = await supabase.from('performance_reviews').insert({
-      employee_id: form.employee_id, period: form.period, review_date: form.review_date,
-      rating: Number(form.rating), goals: form.goals, strengths: form.strengths,
-      weaknesses: form.weaknesses, recommendations: form.recommendations,
+      company_id: company.id,
+      employee_id: form.employee_id,
+      reviewer_id: myEmployeeId,
+      period: form.period,
+      review_date: form.review_date,
+      rating: Number(form.rating),
+      goals: form.goals,
+      strengths: form.strengths,
+      weaknesses: form.weaknesses,
+      recommendations: form.recommendations,
     });
     if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
     else {
       toast({ title: 'تم حفظ التقييم' });
       setOpen(false);
-      const { data } = await supabase.from('performance_reviews').select('*, employee:employees(*)').order('review_date', { ascending: false });
-      setReviews((data ?? []) as PerformanceReview[]);
+      setForm(emptyForm());
+      await loadReviews(company.id);
     }
   }
 
@@ -76,7 +109,7 @@ export default function ReviewsPage() {
       />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl" aria-describedby={undefined}>
           <DialogHeader><DialogTitle>تقييم أداء جديد</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2"><Label>الموظف</Label><Select value={form.employee_id} onValueChange={(v) => setForm({ ...form, employee_id: v })}><SelectTrigger><SelectValue placeholder="اختر" /></SelectTrigger><SelectContent>{employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.full_name}</SelectItem>)}</SelectContent></Select></div>

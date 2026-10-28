@@ -1,4 +1,4 @@
-import type { RoleName, CompanyRole } from './types';
+ import type { RoleName, CompanyRole } from './types';
 
 export type Permission =
   | 'dashboard.view'

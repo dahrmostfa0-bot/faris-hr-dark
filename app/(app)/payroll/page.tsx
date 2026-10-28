@@ -1,9 +1,9 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import { Wallet, Plus, Download, FileSpreadsheet, Printer } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -20,69 +20,128 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/permissions';
+import { hasCompanyPermission } from '@/lib/permissions';
 import { formatCurrency, AR_MONTHS } from '@/lib/format';
 import { PAYROLL_STATUS_LABELS, type Payroll, type Employee, type PayrollStatus } from '@/lib/types';
 
-export default function PayrollPage() {
-  const { role } = useAuth();
-  const { toast } = useToast();
-  const canManage = hasPermission(role ?? undefined, 'payroll.manage');
-  const canExport = hasPermission(role ?? undefined, 'payroll.export');
+const PAYROLL_SELECT = '*, employee:employees(id, full_name, employee_code)';
 
-  const [payrolls, setPayrolls] = useState<Payroll[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
+function esc(v: unknown) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function csvCell(v: string) {
+  const s = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function calcNet(f: { basic_salary: number; allowances: number; bonuses: number; overtime_pay: number; deductions: number; loans: number }) {
+  return Number(f.basic_salary) + Number(f.allowances) + Number(f.bonuses) + Number(f.overtime_pay) - Number(f.deductions) - Number(f.loans);
+}
+
+function emptyForm() {
+  return {
     employee_id: '', month: new Date().getMonth() + 1, year: new Date().getFullYear(),
     basic_salary: 0, allowances: 0, bonuses: 0, deductions: 0, loans: 0, overtime_pay: 0,
-  });
+  };
+}
+
+type EmployeePay = Employee & { basic_salary?: number; allowances?: number };
+
+export default function PayrollPage() {
+  const { company, companyRole } = useAuth();
+  const { toast } = useToast();
+  const role = companyRole ?? undefined;
+  const canManage = hasCompanyPermission(role, 'payroll.manage');
+  const canExport = hasCompanyPermission(role, 'payroll.export');
+
+  const [payrolls, setPayrolls] = useState<Payroll[]>([]);
+  const [employees, setEmployees] = useState<EmployeePay[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(emptyForm());
+
+  async function loadPayrolls(companyId: string) {
+    const { data } = await supabase
+      .from('payroll')
+      .select(PAYROLL_SELECT)
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false });
+    setPayrolls((data ?? []) as unknown as Payroll[]);
+  }
 
   useEffect(() => {
+    if (!company) { setLoading(false); return; }
     (async () => {
-      const [prRes, empRes] = await Promise.all([
-        supabase.from('payroll').select('*, employee:employees(*)').order('created_at', { ascending: false }),
-        supabase.from('employees').select('id, full_name, employee_code, basic_salary, allowances').order('full_name'),
-      ]);
-      setPayrolls((prRes.data ?? []) as Payroll[]);
-      setEmployees((empRes.data ?? []) as Employee[]);
+      const empRes = await supabase
+        .from('employees')
+        .select('id, full_name, employee_code, basic_salary, allowances')
+        .eq('company_id', company.id)
+        .order('full_name');
+      setEmployees((empRes.data ?? []) as unknown as EmployeePay[]);
+      await loadPayrolls(company.id);
       setLoading(false);
     })();
-  }, []);
+  }, [company]);
 
   async function handleSubmit() {
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!form.employee_id) { toast({ title: 'اختر موظف', variant: 'destructive' }); return; }
-    const net = Number(form.basic_salary) + Number(form.allowances) + Number(form.bonuses) + Number(form.overtime_pay) - Number(form.deductions) - Number(form.loans);
-    const { error } = await supabase.from('payroll').insert({
-      employee_id: form.employee_id, month: form.month, year: form.year,
-      basic_salary: Number(form.basic_salary), allowances: Number(form.allowances), bonuses: Number(form.bonuses),
-      deductions: Number(form.deductions), loans: Number(form.loans), overtime_pay: Number(form.overtime_pay),
-      net_salary: net, status: 'draft',
-    });
-    if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-    else {
-      toast({ title: 'تم إنشاء كشف الرواتب' });
-      setOpen(false);
-      const { data } = await supabase.from('payroll').select('*, employee:employees(*)').order('created_at', { ascending: false });
-      setPayrolls((data ?? []) as Payroll[]);
+    const nums = [form.basic_salary, form.allowances, form.bonuses, form.deductions, form.loans, form.overtime_pay];
+    if (nums.some((n) => Number(n) < 0 || Number.isNaN(Number(n)))) {
+      toast({ title: 'القيم لا يمكن أن تكون سالبة', variant: 'destructive' });
+      return;
     }
+    const net = calcNet(form);
+    const { error } = await supabase.from('payroll').insert({
+      company_id: company.id,
+      employee_id: form.employee_id,
+      month: form.month,
+      year: form.year,
+      basic_salary: Number(form.basic_salary),
+      allowances: Number(form.allowances),
+      bonuses: Number(form.bonuses),
+      deductions: Number(form.deductions),
+      loans: Number(form.loans),
+       overtime_pay: Number(form.overtime_pay),
+      status: 'draft',
+    });
+    if (error) {
+      const dup = error.code === '23505';
+      toast({
+        title: 'خطأ',
+        description: dup ? 'يوجد كشف راتب لهذا الموظف في نفس الشهر والسنة' : error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+    toast({ title: 'تم إنشاء كشف الرواتب' });
+    setOpen(false);
+    setForm(emptyForm());
+    await loadPayrolls(company.id);
   }
 
   async function updateStatus(id: string, status: PayrollStatus) {
-    await supabase.from('payroll').update({ status }).eq('id', id);
+    if (status === 'paid' && !confirm('تأكيد دفع هذا الراتب؟ لا يمكن التراجع بعد الدفع.')) return;
+    const { error } = await supabase.from('payroll').update({ status }).eq('id', id);
+    if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
     setPayrolls((p) => p.map((x) => x.id === id ? { ...x, status } : x));
     toast({ title: 'تم التحديث' });
   }
 
   function exportCsv() {
-    const rows = [['الموظف', 'الشهر', 'السنة', 'الأساسي', 'البدلات', 'المكافآت', 'الخصومات', 'السلف', 'إضافي', 'الصافي', 'الحالة']];
+    const rows: string[][] = [['الموظف', 'الشهر', 'السنة', 'الأساسي', 'البدلات', 'المكافآت', 'الخصومات', 'السلف', 'إضافي', 'الصافي', 'الحالة']];
     payrolls.forEach((p) => rows.push([
       p.employee?.full_name ?? '', String(p.month), String(p.year),
       String(p.basic_salary), String(p.allowances), String(p.bonuses), String(p.deductions), String(p.loans), String(p.overtime_pay), String(p.net_salary),
       PAYROLL_STATUS_LABELS[p.status as keyof typeof PAYROLL_STATUS_LABELS] ?? p.status,
     ]));
-    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+    const csv = rows.map((r) => r.map(csvCell).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'payroll.csv'; a.click();
@@ -93,34 +152,38 @@ export default function PayrollPage() {
     const w = window.open('', '_blank');
     if (!w) return;
     w.document.write(`<html dir="rtl"><head><title>كشف راتب</title><style>body{font-family:Arial;padding:40px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #ccc;padding:8px;text-align:right}</style></head><body>
-      <h1>كشف راتب - ${p.employee?.full_name ?? ''}</h1>
-      <p>الشهر: ${AR_MONTHS[p.month - 1]} ${p.year}</p>
-      <table><tr><td>الراتب الأساسي</td><td>${formatCurrency(p.basic_salary)}</td></tr>
-      <tr><td>البدلات</td><td>${formatCurrency(p.allowances)}</td></tr>
-      <tr><td>المكافآت</td><td>${formatCurrency(p.bonuses)}</td></tr>
-      <tr><td>الساعات الإضافية</td><td>${formatCurrency(p.overtime_pay)}</td></tr>
-      <tr><td>الخصومات</td><td>- ${formatCurrency(p.deductions)}</td></tr>
-      <tr><td>السلف</td><td>- ${formatCurrency(p.loans)}</td></tr>
-      <tr><td><b>صافي الراتب</b></td><td><b>${formatCurrency(p.net_salary)}</b></td></tr></table>
+      <h1>كشف راتب - ${esc(p.employee?.full_name)}</h1>
+      <p>الشهر: ${esc(AR_MONTHS[p.month - 1])} ${esc(p.year)}</p>
+      <table><tr><td>الراتب الأساسي</td><td>${esc(formatCurrency(p.basic_salary))}</td></tr>
+      <tr><td>البدلات</td><td>${esc(formatCurrency(p.allowances))}</td></tr>
+      <tr><td>المكافآت</td><td>${esc(formatCurrency(p.bonuses))}</td></tr>
+      <tr><td>الساعات الإضافية</td><td>${esc(formatCurrency(p.overtime_pay))}</td></tr>
+      <tr><td>الخصومات</td><td>- ${esc(formatCurrency(p.deductions))}</td></tr>
+      <tr><td>السلف</td><td>- ${esc(formatCurrency(p.loans))}</td></tr>
+      <tr><td><b>صافي الراتب</b></td><td><b>${esc(formatCurrency(p.net_salary))}</b></td></tr></table>
       </body></html>`);
     w.document.close(); w.print();
   }
+
+  const totalNet = payrolls.reduce((s, p) => s + Number(p.net_salary || 0), 0);
 
   function printMasir() {
     if (payrolls.length === 0) { toast({ title: 'لا توجد كشوف للطباعة', variant: 'destructive' }); return; }
     const w = window.open('', '_blank');
     if (!w) return;
+    const sum = (k: 'basic_salary' | 'allowances' | 'bonuses' | 'overtime_pay' | 'deductions' | 'loans') =>
+      payrolls.reduce((s, p) => s + Number(p[k] || 0), 0);
     const rows = payrolls.map((p, i) => `<tr>
       <td style="text-align:center">${i + 1}</td>
-      <td>${p.employee?.full_name ?? '-'}</td>
-      <td style="text-align:center">${p.employee?.employee_code ?? '-'}</td>
-      <td style="text-align:left">${formatCurrency(p.basic_salary)}</td>
-      <td style="text-align:left">${formatCurrency(p.allowances)}</td>
-      <td style="text-align:left">${formatCurrency(p.bonuses)}</td>
-      <td style="text-align:left">${formatCurrency(p.overtime_pay)}</td>
-      <td style="text-align:left">- ${formatCurrency(p.deductions)}</td>
-      <td style="text-align:left">- ${formatCurrency(p.loans)}</td>
-      <td style="text-align:left"><b>${formatCurrency(p.net_salary)}</b></td>
+      <td>${esc(p.employee?.full_name ?? '-')}</td>
+      <td style="text-align:center">${esc(p.employee?.employee_code ?? '-')}</td>
+      <td style="text-align:left">${esc(formatCurrency(p.basic_salary))}</td>
+      <td style="text-align:left">${esc(formatCurrency(p.allowances))}</td>
+      <td style="text-align:left">${esc(formatCurrency(p.bonuses))}</td>
+      <td style="text-align:left">${esc(formatCurrency(p.overtime_pay))}</td>
+      <td style="text-align:left">- ${esc(formatCurrency(p.deductions))}</td>
+      <td style="text-align:left">- ${esc(formatCurrency(p.loans))}</td>
+      <td style="text-align:left"><b>${esc(formatCurrency(p.net_salary))}</b></td>
     </tr>`).join('');
     w.document.write(`<html dir="rtl"><head><title>مسير الرواتب</title><style>
       body{font-family:Arial;padding:30px}
@@ -150,20 +213,20 @@ export default function PayrollPage() {
         <tbody>${rows}</tbody>
         <tfoot><tr>
           <td colspan="3" style="text-align:center">الإجمالي</td>
-          <td>${formatCurrency(payrolls.reduce((s, p) => s + p.basic_salary, 0))}</td>
-          <td>${formatCurrency(payrolls.reduce((s, p) => s + p.allowances, 0))}</td>
-          <td>${formatCurrency(payrolls.reduce((s, p) => s + p.bonuses, 0))}</td>
-          <td>${formatCurrency(payrolls.reduce((s, p) => s + p.overtime_pay, 0))}</td>
-          <td>${formatCurrency(payrolls.reduce((s, p) => s + p.deductions, 0))}</td>
-          <td>${formatCurrency(payrolls.reduce((s, p) => s + p.loans, 0))}</td>
-          <td>${formatCurrency(totalNet)}</td>
+          <td>${esc(formatCurrency(sum('basic_salary')))}</td>
+          <td>${esc(formatCurrency(sum('allowances')))}</td>
+          <td>${esc(formatCurrency(sum('bonuses')))}</td>
+          <td>${esc(formatCurrency(sum('overtime_pay')))}</td>
+          <td>${esc(formatCurrency(sum('deductions')))}</td>
+          <td>${esc(formatCurrency(sum('loans')))}</td>
+          <td>${esc(formatCurrency(totalNet))}</td>
         </tr></tfoot>
       </table>
     </body></html>`);
     w.document.close(); w.print();
   }
 
-  const totalNet = payrolls.reduce((s, p) => s + Number(p.net_salary || 0), 0);
+  const previewNet = calcNet(form);
 
   return (
     <div className="space-y-6">
@@ -180,14 +243,14 @@ export default function PayrollPage() {
       />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl" aria-describedby={undefined}>
           <DialogHeader><DialogTitle>إنشاء كشف راتب</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label>الموظف</Label>
               <Select value={form.employee_id} onValueChange={(v) => {
                 const emp = employees.find((e) => e.id === v);
-                setForm({ ...form, employee_id: v, basic_salary: emp?.basic_salary ?? 0, allowances: emp?.allowances ?? 0 });
+                setForm({ ...form, employee_id: v, basic_salary: Number(emp?.basic_salary ?? 0), allowances: Number(emp?.allowances ?? 0) });
               }}>
                 <SelectTrigger><SelectValue placeholder="اختر الموظف" /></SelectTrigger>
                 <SelectContent>{employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.full_name}</SelectItem>)}</SelectContent>
@@ -195,12 +258,15 @@ export default function PayrollPage() {
             </div>
             <div className="space-y-2"><Label>الشهر</Label><Select value={String(form.month)} onValueChange={(v) => setForm({ ...form, month: Number(v) })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{AR_MONTHS.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}</SelectContent></Select></div>
             <div className="space-y-2"><Label>السنة</Label><Input type="number" value={form.year} onChange={(e) => setForm({ ...form, year: Number(e.target.value) })} /></div>
-            <div className="space-y-2"><Label>الراتب الأساسي</Label><Input type="number" value={form.basic_salary} onChange={(e) => setForm({ ...form, basic_salary: Number(e.target.value) })} /></div>
-            <div className="space-y-2"><Label>البدلات</Label><Input type="number" value={form.allowances} onChange={(e) => setForm({ ...form, allowances: Number(e.target.value) })} /></div>
-            <div className="space-y-2"><Label>المكافآت</Label><Input type="number" value={form.bonuses} onChange={(e) => setForm({ ...form, bonuses: Number(e.target.value) })} /></div>
-            <div className="space-y-2"><Label>الخصومات</Label><Input type="number" value={form.deductions} onChange={(e) => setForm({ ...form, deductions: Number(e.target.value) })} /></div>
-            <div className="space-y-2"><Label>السلف</Label><Input type="number" value={form.loans} onChange={(e) => setForm({ ...form, loans: Number(e.target.value) })} /></div>
-            <div className="space-y-2"><Label>أجر إضافي</Label><Input type="number" value={form.overtime_pay} onChange={(e) => setForm({ ...form, overtime_pay: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>الراتب الأساسي</Label><Input type="number" min={0} value={form.basic_salary} onChange={(e) => setForm({ ...form, basic_salary: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>البدلات</Label><Input type="number" min={0} value={form.allowances} onChange={(e) => setForm({ ...form, allowances: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>المكافآت</Label><Input type="number" min={0} value={form.bonuses} onChange={(e) => setForm({ ...form, bonuses: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>الخصومات</Label><Input type="number" min={0} value={form.deductions} onChange={(e) => setForm({ ...form, deductions: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>السلف</Label><Input type="number" min={0} value={form.loans} onChange={(e) => setForm({ ...form, loans: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>أجر إضافي</Label><Input type="number" min={0} value={form.overtime_pay} onChange={(e) => setForm({ ...form, overtime_pay: Number(e.target.value) })} /></div>
+            <div className="sm:col-span-2 rounded-lg bg-muted/50 p-3 text-sm">
+              صافي الراتب المتوقع: <span className="font-bold">{formatCurrency(previewNet)}</span>
+            </div>
           </div>
           <DialogFooter><Button onClick={handleSubmit}>إنشاء</Button></DialogFooter>
         </DialogContent>

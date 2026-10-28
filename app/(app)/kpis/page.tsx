@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import { Target, Plus, Trash2, TrendingUp, Award } from 'lucide-react';
@@ -21,79 +21,111 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
-import { hasPermission } from '@/lib/permissions';
+import { hasCompanyPermission } from '@/lib/permissions';
 import type { Kpi, Employee } from '@/lib/types';
 import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
   ResponsiveContainer, Tooltip,
 } from 'recharts';
 
+const KPI_SELECT = '*, employee:employees(id, full_name)';
+
+function calcScore(actual: number, target: number) {
+  return target > 0 ? Math.min(100, Math.round((actual / target) * 100)) : 0;
+}
+
+function defaultPeriod() {
+  return `${new Date().getFullYear()}-Q${Math.ceil((new Date().getMonth() + 1) / 3)}`;
+}
+
+function emptyForm() {
+  return { employee_id: '', title: '', description: '', target: 100, actual: 0, weight: 3, period: defaultPeriod() };
+}
+
 export default function KpisPage() {
-  const { role } = useAuth();
+  const { company, companyRole } = useAuth();
   const { toast } = useToast();
-  const canManage = hasPermission(role ?? undefined, 'kpis.manage');
+  const canManage = hasCompanyPermission(companyRole ?? undefined, 'kpis.manage');
 
   const [kpis, setKpis] = useState<Kpi[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [selEmp, setSelEmp] = useState<string>('all');
-  const [form, setForm] = useState({ employee_id: '', title: '', description: '', target: 100, actual: 0, weight: 3, period: `${new Date().getFullYear()}-Q${Math.ceil((new Date().getMonth() + 1) / 3)}` });
+  const [form, setForm] = useState(emptyForm());
+
+  async function loadKpis(companyId: string) {
+    const { data } = await supabase
+      .from('kpis')
+      .select(KPI_SELECT)
+      .eq('company_id', companyId)
+      .order('created_at', { ascending: false });
+    setKpis((data ?? []) as unknown as Kpi[]);
+  }
 
   useEffect(() => {
+    if (!company) { setLoading(false); return; }
     (async () => {
-      const [kRes, eRes] = await Promise.all([
-        supabase.from('kpis').select('*, employee:employees(*)').order('created_at', { ascending: false }),
-        supabase.from('employees').select('id, full_name').order('full_name'),
-      ]);
-      setKpis((kRes.data ?? []) as Kpi[]);
+      const eRes = await supabase
+        .from('employees')
+        .select('id, full_name')
+        .eq('company_id', company.id)
+        .order('full_name');
       setEmployees((eRes.data ?? []) as Employee[]);
+      await loadKpis(company.id);
       setLoading(false);
     })();
-  }, []);
+  }, [company]);
 
   async function handleSubmit() {
+    if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!form.employee_id || !form.title) { toast({ title: 'أكمل البيانات', variant: 'destructive' }); return; }
-    const score = Number(form.target) > 0 ? Math.min(100, Math.round((Number(form.actual) / Number(form.target)) * 100)) : 0;
+    const score = calcScore(Number(form.actual), Number(form.target));
     const { error } = await supabase.from('kpis').insert({
-      employee_id: form.employee_id, title: form.title, description: form.description,
-      target: Number(form.target), actual: Number(form.actual), weight: Number(form.weight),
-      period: form.period, score,
+      company_id: company.id,
+      employee_id: form.employee_id,
+      title: form.title,
+      description: form.description,
+      target: Number(form.target),
+      actual: Number(form.actual),
+      weight: Number(form.weight),
+      period: form.period,
+      score,
     });
     if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
     else {
       toast({ title: 'تم إضافة المؤشر' });
       setOpen(false);
-      const { data } = await supabase.from('kpis').select('*, employee:employees(*)').order('created_at', { ascending: false });
-      setKpis((data ?? []) as Kpi[]);
+      setForm(emptyForm());
+      await loadKpis(company.id);
     }
   }
 
   async function updateActual(id: string, actual: number) {
     const kpi = kpis.find((k) => k.id === id);
     if (!kpi) return;
-    const score = kpi.target > 0 ? Math.min(100, Math.round((actual / kpi.target) * 100)) : 0;
-    await supabase.from('kpis').update({ actual, score }).eq('id', id);
+    const score = calcScore(actual, kpi.target);
+    const { error } = await supabase.from('kpis').update({ actual, score }).eq('id', id);
+    if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
     setKpis((k) => k.map((x) => x.id === id ? { ...x, actual, score } : x));
   }
 
   async function remove(id: string) {
     if (!confirm('حذف هذا المؤشر؟')) return;
-    await supabase.from('kpis').delete().eq('id', id);
+    const { error } = await supabase.from('kpis').delete().eq('id', id);
+    if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
     setKpis((k) => k.filter((x) => x.id !== id));
     toast({ title: 'تم الحذف' });
   }
 
   const filtered = selEmp === 'all' ? kpis : kpis.filter((k) => k.employee_id === selEmp);
 
-  // radar chart data for selected employee
   const radarData = (selEmp === 'all' ? [] : kpis.filter((k) => k.employee_id === selEmp)).map((k) => ({
     subject: k.title.length > 12 ? k.title.slice(0, 12) + '…' : k.title,
     score: k.score,
     full: k.title,
   }));
 
-  // overall avg score
   const avgScore = kpis.length > 0 ? Math.round(kpis.reduce((s, k) => s + k.score, 0) / kpis.length) : 0;
 
   return (
@@ -105,7 +137,7 @@ export default function KpisPage() {
       />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader><DialogTitle>إضافة مؤشر أداء</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2"><Label>الموظف</Label><Select value={form.employee_id} onValueChange={(v) => setForm({ ...form, employee_id: v })}><SelectTrigger><SelectValue placeholder="اختر" /></SelectTrigger><SelectContent>{employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.full_name}</SelectItem>)}</SelectContent></Select></div>

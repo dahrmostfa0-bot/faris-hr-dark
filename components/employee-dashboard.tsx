@@ -1,43 +1,44 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Clock,
-  CalendarDays,
-  CalendarCheck,
-  UserCog,
-  Bell,
-  CheckSquare,
-  TrendingUp,
-} from 'lucide-react';
+import { Clock, CalendarDays, CalendarCheck, Bell, CheckSquare } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { StatCard } from '@/components/stat-card';
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
+  Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/lib/auth-context';
 import { formatDateAr, formatTimeAr } from '@/lib/format';
 import type { Attendance, Leave, Notification } from '@/lib/types';
 import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 
+const TZ = 'Africa/Cairo';
+
+function cairoDate(d = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
+}
+
+function daysAgoStr(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return cairoDate(d);
+}
+
+const LEAVE_TYPE: Record<string, string> = {
+  annual: 'سنوية', sick: 'مرضية', emergency: 'اضطرارية', unpaid: 'بدون راتب',
+};
+
 export function EmployeeDashboard() {
+  const { user, company } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const [hasEmployee, setHasEmployee] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [notifs, setNotifs] = useState<Notification[]>([]);
@@ -45,84 +46,70 @@ export function EmployeeDashboard() {
   const [weekTrend, setWeekTrend] = useState<{ name: string; ساعات: number }[]>([]);
 
   useEffect(() => {
+    if (!company || !user) { setLoading(false); return; }
     let cancelled = false;
 
     (async () => {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user || cancelled) return;
-
-        const { data: emp } = await supabase
+        const { data: emp, error: empErr } = await supabase
           .from('employees')
-          .select('id, full_name, department:departments(name_ar, name)')
+          .select('id')
+          .eq('company_id', company.id)
           .eq('user_id', user.id)
           .maybeSingle();
+        if (empErr) throw new Error(empErr.message);
+        if (!emp) { if (!cancelled) setHasEmployee(false); return; }
 
-        if (!emp || cancelled) {
-          setLoading(false);
-          return;
-        }
-
-        setEmployeeId(emp.id);
-
-        const today = new Date().toISOString().slice(0, 10);
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const sevenStr = sevenDaysAgo.toISOString().slice(0, 10);
+        const today = cairoDate();
+        const weekAgo = daysAgoStr(6);
 
         const [attRes, leaveRes, notifRes] = await Promise.all([
-          supabase
-            .from('attendance')
-            .select('*')
-            .eq('employee_id', emp.id)
-            .gte('date', sevenStr)
-            .order('date', { ascending: false }),
-          supabase
-            .from('leaves')
-            .select('*')
-            .eq('employee_id', emp.id)
-            .order('created_at', { ascending: false })
-            .limit(5),
-          supabase
-            .from('notifications')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(5),
+          supabase.from('attendance').select('*')
+            .eq('employee_id', emp.id).gte('date', weekAgo).order('date', { ascending: false }),
+          supabase.from('leaves').select('*')
+            .eq('employee_id', emp.id).order('created_at', { ascending: false }).limit(5),
+          supabase.from('notifications').select('*')
+            .eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
         ]);
-
         if (cancelled) return;
 
-        setAttendance((attRes.data ?? []) as Attendance[]);
+        const att = (attRes.data ?? []) as Attendance[];
+        setAttendance(att);
         setLeaves((leaveRes.data ?? []) as Leave[]);
         setNotifs((notifRes.data ?? []) as Notification[]);
-
-        const todayRec = (attRes.data ?? []).find((a: any) => a.date === today);
-        setTodayAttendance(todayRec ?? null);
+        setTodayAttendance(att.find((a) => a.date === today) ?? null);
 
         const trend: { name: string; ساعات: number }[] = [];
         for (let i = 6; i >= 0; i--) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          const ds = d.toISOString().slice(0, 10);
-          const rec = (attRes.data ?? []).find((a: any) => a.date === ds);
-          trend.push({
-            name: `${d.getDate()}/${d.getMonth() + 1}`,
-            ساعات: rec?.work_hours ?? 0,
-          });
+          const ds = daysAgoStr(i);
+          const [, m, d] = ds.split('-');
+          const rec = att.find((a) => a.date === ds);
+          trend.push({ name: `${Number(d)}/${Number(m)}`, ساعات: Number(rec?.work_hours ?? 0) });
         }
         setWeekTrend(trend);
-      } catch {
-        // ignore
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : 'خطأ غير متوقع');
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
-  }, []);
+  }, [company, user]);
 
   if (loading) {
     return <div className="flex h-64 items-center justify-center text-muted-foreground">جاري تحميل بياناتك...</div>;
+  }
+
+  if (!hasEmployee) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="لوحة التحكم" description="بياناتك الشخصية وحضورك" />
+        <Card><CardContent className="p-6 text-sm text-muted-foreground">
+          حسابك غير مربوط بسجل موظف. تواصل مع الموارد البشرية لربط حسابك.
+        </CardContent></Card>
+      </div>
+    );
   }
 
   const presentDays = attendance.filter((a) => a.status === 'present').length;
@@ -135,10 +122,12 @@ export function EmployeeDashboard() {
       <PageHeader
         title="لوحة التحكم"
         description="بياناتك الشخصية وحضورك"
-        actions={
-          <Button asChild variant="outline"><Link href="/self-service">الخدمة الذاتية</Link></Button>
-        }
+        actions={<Button asChild variant="outline"><Link href="/self-service">الخدمة الذاتية</Link></Button>}
       />
+
+      {error && (
+        <Card><CardContent className="p-4 text-sm text-destructive">تعذّر تحميل جزء من البيانات: {error}</CardContent></Card>
+      )}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         <StatCard title="أيام الحضور (7 أيام)" value={presentDays} icon={CalendarCheck} color="success" />
@@ -188,11 +177,11 @@ export function EmployeeDashboard() {
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <span className="text-sm text-muted-foreground">الحضور</span>
-                  <span className="text-sm font-medium">{formatTimeAr(todayAttendance.check_in)}</span>
+                  <span className="text-sm font-medium">{todayAttendance.check_in ? formatTimeAr(todayAttendance.check_in) : '-'}</span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <span className="text-sm text-muted-foreground">الانصراف</span>
-                  <span className="text-sm font-medium">{formatTimeAr(todayAttendance.check_out)}</span>
+                  <span className="text-sm font-medium">{todayAttendance.check_out ? formatTimeAr(todayAttendance.check_out) : '-'}</span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border p-3">
                   <span className="text-sm text-muted-foreground">ساعات العمل</span>
@@ -230,7 +219,7 @@ export function EmployeeDashboard() {
                       </div>
                       <div>
                         <p className="text-sm font-medium">{formatDateAr(l.start_date)} — {l.days} يوم</p>
-                        <p className="text-xs text-muted-foreground">{l.type === 'annual' ? 'سنوية' : l.type === 'sick' ? 'مرضية' : l.type === 'emergency' ? 'اضطرارية' : 'بدون راتب'}</p>
+                        <p className="text-xs text-muted-foreground">{LEAVE_TYPE[l.type] ?? l.type}</p>
                       </div>
                     </div>
                     <Badge variant={l.status === 'hr_approved' ? 'success' : l.status === 'rejected' ? 'destructive' : l.status === 'pending' ? 'warning' : 'secondary'}>
