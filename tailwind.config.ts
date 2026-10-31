@@ -1,4 +1,4 @@
-import type { Config } from 'tailwindcss';
+ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   darkMode: ['class'],
@@ -19,7 +19,7 @@ const config: Config = {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic':
           'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-        'gradient-primary': 'linear-gradient(135deg, hsl(263 70% 60%), hsl(280 65% 65%))',
+        'gradient-primary': 'linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-2)))',
         'gradient-success': 'linear-gradient(135deg, hsl(142 72% 45%), hsl(160 70% 50%))',
         'gradient-warning': 'linear-gradient(135deg, hsl(38 95% 55%), hsl(28 90% 60%))',
       },

@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { AccentPicker } from '@/components/accent-picker';
 import { ROLE_LABELS, COMPANY_ROLE_LABELS } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import type { Notification } from '@/lib/types';
@@ -32,21 +33,33 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [notifs, setNotifs] = useState<Notification[]>([]);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => setMounted(true), []);
 
   useEffect(() => {
+    if (!user) { setNotifs([]); setUnread(0); return; }
+    let alive = true;
     (async () => {
-      const { data } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5);
-      setNotifs((data ?? []) as Notification[]);
+      const [listRes, countRes] = await Promise.all([
+        supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(5),
+        supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('read', false),
+      ]);
+      if (!alive) return;
+      setNotifs((listRes.data ?? []) as Notification[]);
+      setUnread(countRes.count ?? 0);
     })();
-  }, [pathname]);
-
-  const unread = notifs.filter((n) => !n.read).length;
+    return () => { alive = false; };
+  }, [pathname, user]);
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/50 bg-card/70 px-4 backdrop-blur-xl">
@@ -92,6 +105,8 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
           <Sparkles className={cn('h-4 w-4 transition-transform duration-300', guideEnabled && 'scale-110')} />
         </Button>
 
+        {mounted && <AccentPicker />}
+
         {mounted && (
           <Button
             variant="ghost"
@@ -110,7 +125,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
               <Bell className="h-5 w-5" />
               {unread > 0 && (
                 <span className="absolute -top-1 -left-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
-                  {unread}
+                  {unread > 99 ? '99+' : unread}
                 </span>
               )}
             </Button>
