@@ -17,6 +17,7 @@
   Target,
   ShieldAlert,
   Inbox,
+  KeyRound,
 } from 'lucide-react';
 import type { Permission } from '@/lib/permissions';
 
@@ -47,5 +48,6 @@ export const NAV_ITEMS: NavItem[] = [
   { title: 'الإشعارات', href: '/notifications', icon: Bell, permission: 'notifications.view' },
   { title: 'المساعد الذكي', href: '/ai', icon: Sparkles, permission: 'ai.use' },
   { title: 'الإعدادات', href: '/settings', icon: Settings, permission: 'settings.manage' },
+  { title: 'المستخدمون', href: '/settings/users', icon: KeyRound, permission: 'company.manage' },
   { title: 'طلبات التجربة', href: '/requests', icon: Inbox, platformOnly: true },
 ];
