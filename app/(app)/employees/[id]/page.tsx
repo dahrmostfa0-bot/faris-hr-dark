@@ -1,5 +1,4 @@
-
-'use client';
+ 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -26,15 +25,16 @@ import {
   LEAVE_TYPE_LABELS, PAYROLL_STATUS_LABELS, TASK_STATUS_LABELS,
   type Employee, type Attendance, type Leave, type Payroll,
   type EmployeeDocument, type Task, type PerformanceReview,
-  type EmployeeStatus,
+  type EmployeeStatus, type EmployeeSalary, type EmployeeIdentity,
 } from '@/lib/types';
 
 const DOC_BUCKET = 'employee-docs';
 const DOC_EXT = ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'];
 const MAX_DOC_BYTES = 10 * 1024 * 1024;
 
-const SAFE_COLS =
-  'id, company_id, user_id, employee_code, full_name, email, phone, hire_date, status, department_id, position_id, branch_id, manager_id, created_at';
+// أعمدة عامة فقط (بدون national_id / basic_salary / allowances / bank_account)
+const EMP_COLS =
+  'id, company_id, user_id, employee_code, full_name, email, phone, address, birth_date, marital_status, qualification, hire_date, status, notes, department_id, position_id, branch_id, manager_id, created_at';
 const RELATIONS =
   'department:departments!employees_department_id_fkey(id, name, name_ar), position:positions(id, title, title_ar), branch:branches(id, name, name_ar), manager:employees!manager_id(id, full_name)';
 
@@ -67,6 +67,8 @@ export default function EmployeeDetailPage() {
   const canReviews = hasCompanyPermission(role, 'reviews.view');
 
   const [emp, setEmp] = useState<Employee | null>(null);
+  const [salary, setSalary] = useState<EmployeeSalary | null>(null);
+  const [identity, setIdentity] = useState<EmployeeIdentity | null>(null);
   const [docs, setDocs] = useState<EmployeeDocument[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [leaves, setLeaves] = useState<Leave[]>([]);
@@ -92,7 +94,7 @@ export default function EmployeeDetailPage() {
     (async () => {
       const empRes = await supabase
         .from('employees')
-        .select(`${canSeeSensitive ? '*' : SAFE_COLS}, ${RELATIONS}`)
+        .select(`${EMP_COLS}, ${RELATIONS}`)
         .eq('id', id)
         .eq('company_id', company.id)
         .maybeSingle();
@@ -100,7 +102,9 @@ export default function EmployeeDetailPage() {
       if (!empRes.data) { setEmp(null); setLoading(false); return; }
       setEmp(empRes.data as unknown as Employee);
 
-      const [att, lv, pr, tk, rv] = await Promise.all([
+      const [sal, idn, att, lv, pr, tk, rv] = await Promise.all([
+        canSeeSensitive ? supabase.from('employee_salary').select('*').eq('employee_id', id).maybeSingle() : null,
+        canSeeSensitive ? supabase.from('employee_identity').select('*').eq('employee_id', id).maybeSingle() : null,
         canAttendance ? supabase.from('attendance').select('*').eq('employee_id', id).order('date', { ascending: false }).limit(20) : null,
         canLeaves ? supabase.from('leaves').select('*').eq('employee_id', id).order('created_at', { ascending: false }).limit(20) : null,
         canPayroll ? supabase.from('payroll').select('*').eq('employee_id', id).order('created_at', { ascending: false }).limit(12) : null,
@@ -108,6 +112,8 @@ export default function EmployeeDetailPage() {
         canReviews ? supabase.from('performance_reviews').select('*').eq('employee_id', id).order('review_date', { ascending: false }).limit(10) : null,
       ]);
       if (cancelled) return;
+      setSalary((sal?.data ?? null) as EmployeeSalary | null);
+      setIdentity((idn?.data ?? null) as EmployeeIdentity | null);
       setAttendance((att?.data ?? []) as Attendance[]);
       setLeaves((lv?.data ?? []) as Leave[]);
       setPayrolls((pr?.data ?? []) as Payroll[]);
@@ -232,14 +238,14 @@ export default function EmployeeDetailPage() {
               <InfoRow icon={User} label="المدير المباشر" value={emp.manager?.full_name} />
               {canSeeSensitive && (
                 <>
-                  <InfoRow icon={User} label="الرقم القومي" value={emp.national_id} />
+                  <InfoRow icon={User} label="الرقم القومي" value={identity?.national_id} />
                   <InfoRow icon={Calendar} label="تاريخ الميلاد" value={emp.birth_date ? formatDateAr(emp.birth_date) : null} />
                   <InfoRow icon={User} label="الحالة الاجتماعية" value={emp.marital_status ? (MARITAL[emp.marital_status] ?? emp.marital_status) : null} />
                   <InfoRow icon={Briefcase} label="المؤهل" value={emp.qualification} />
                   <InfoRow icon={MapPin} label="العنوان" value={emp.address} />
-                  <InfoRow icon={Wallet} label="الراتب الأساسي" value={formatCurrency(emp.basic_salary)} />
-                  <InfoRow icon={Wallet} label="البدلات" value={formatCurrency(emp.allowances)} />
-                  <InfoRow icon={Wallet} label="الحساب البنكي" value={emp.bank_account} />
+                  <InfoRow icon={Wallet} label="الراتب الأساسي" value={salary ? formatCurrency(salary.basic_salary) : null} />
+                  <InfoRow icon={Wallet} label="البدلات" value={salary ? formatCurrency(salary.allowances) : null} />
+                  <InfoRow icon={Wallet} label="الحساب البنكي" value={identity?.bank_account} />
                 </>
               )}
             </CardContent>

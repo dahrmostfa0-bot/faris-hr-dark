@@ -23,6 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/lib/auth-context';
 import { hasCompanyPermission } from '@/lib/permissions';
 import type { Kpi, Employee } from '@/lib/types';
+
 import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
   ResponsiveContainer, Tooltip,
@@ -104,7 +105,7 @@ export default function KpisPage() {
   async function updateActual(id: string, actual: number) {
     const kpi = kpis.find((k) => k.id === id);
     if (!kpi) return;
-    const score = calcScore(actual, kpi.target);
+    const score = calcScore(actual, kpi.target ?? 0);
     const { error } = await supabase.from('kpis').update({ actual, score }).eq('id', id);
     if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
     setKpis((k) => k.map((x) => x.id === id ? { ...x, actual, score } : x));
@@ -121,12 +122,12 @@ export default function KpisPage() {
   const filtered = selEmp === 'all' ? kpis : kpis.filter((k) => k.employee_id === selEmp);
 
   const radarData = (selEmp === 'all' ? [] : kpis.filter((k) => k.employee_id === selEmp)).map((k) => ({
-    subject: k.title.length > 12 ? k.title.slice(0, 12) + '…' : k.title,
-    score: k.score,
-    full: k.title,
+    subject: (k.title ?? '').length > 12 ? (k.title ?? '').slice(0, 12) + '…' : (k.title ?? ''),
+    score: k.score ?? 0,
+    full: k.title ?? '',
   }));
 
-  const avgScore = kpis.length > 0 ? Math.round(kpis.reduce((s, k) => s + k.score, 0) / kpis.length) : 0;
+  const avgScore = kpis.length > 0 ? Math.round(kpis.reduce((s, k) => s + (k.score ?? 0), 0) / kpis.length) : 0;
 
   return (
     <div className="space-y-6">
@@ -157,7 +158,7 @@ export default function KpisPage() {
       <div className="grid gap-3 sm:grid-cols-3">
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"><Target className="h-5 w-5" /></div><div><p className="text-sm text-muted-foreground">إجمالي المؤشرات</p><p className="text-xl font-bold">{kpis.length}</p></div></CardContent></Card>
         <Card><CardContent className="flex items-center gap-3 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success"><TrendingUp className="h-5 w-5" /></div><div><p className="text-sm text-muted-foreground">متوسط الأداء</p><p className="text-xl font-bold">{avgScore}%</p></div></CardContent></Card>
-        <Card><CardContent className="flex items-center gap-3 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10 text-warning"><Award className="h-5 w-5" /></div><div><p className="text-sm text-muted-foreground">أداء ممتاز (90%+)</p><p className="text-xl font-bold">{kpis.filter((k) => k.score >= 90).length}</p></div></CardContent></Card>
+        <Card><CardContent className="flex items-center gap-3 p-4"><div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10 text-warning"><Award className="h-5 w-5" /></div><div><p className="text-sm text-muted-foreground">أداء ممتاز (90%+)</p><p className="text-xl font-bold">{kpis.filter((k) => (k.score ?? 0) >= 90).length}</p></div></CardContent></Card>
       </div>
 
       <div className="flex items-center gap-3">
@@ -180,24 +181,27 @@ export default function KpisPage() {
               <Table>
                 <TableHeader><TableRow><TableHead>الموظف</TableHead><TableHead>المؤشر</TableHead><TableHead>الهدف</TableHead><TableHead>الفعلي</TableHead><TableHead>الوزن</TableHead><TableHead>النسبة</TableHead>{canManage && <TableHead>إجراءات</TableHead>}</TableRow></TableHeader>
                 <TableBody>
-                  {filtered.map((k) => (
-                    <TableRow key={k.id}>
-                      <TableCell className="font-medium">{k.employee?.full_name ?? '-'}</TableCell>
-                      <TableCell>{k.title}</TableCell>
-                      <TableCell>{k.target}</TableCell>
-                      <TableCell>
-                        {canManage ? <Input type="number" value={k.actual} onChange={(e) => updateActual(k.id, Number(e.target.value))} className="h-8 w-20" /> : k.actual}
-                      </TableCell>
-                      <TableCell><Badge variant="secondary">{k.weight}</Badge></TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="h-2 w-16 overflow-hidden rounded-full bg-secondary"><div className={`h-full ${k.score >= 75 ? 'bg-success' : k.score >= 50 ? 'bg-warning' : 'bg-destructive'}`} style={{ width: `${k.score}%` }} /></div>
-                          <span className="text-sm font-medium tabular-nums">{k.score}%</span>
-                        </div>
-                      </TableCell>
-                      {canManage && <TableCell><Button size="icon" variant="ghost" onClick={() => remove(k.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button></TableCell>}
-                    </TableRow>
-                  ))}
+                  {filtered.map((k) => {
+                    const score = k.score ?? 0;
+                    return (
+                      <TableRow key={k.id}>
+                        <TableCell className="font-medium">{k.employee?.full_name ?? '-'}</TableCell>
+                        <TableCell>{k.title}</TableCell>
+                        <TableCell>{k.target}</TableCell>
+                        <TableCell>
+                          {canManage ? <Input type="number" value={k.actual ?? 0} onChange={(e) => updateActual(k.id, Number(e.target.value))} className="h-8 w-20" /> : k.actual}
+                        </TableCell>
+                        <TableCell><Badge variant="secondary">{k.weight}</Badge></TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-16 overflow-hidden rounded-full bg-secondary"><div className={`h-full ${score >= 75 ? 'bg-success' : score >= 50 ? 'bg-warning' : 'bg-destructive'}`} style={{ width: `${score}%` }} /></div>
+                            <span className="text-sm font-medium tabular-nums">{score}%</span>
+                          </div>
+                        </TableCell>
+                        {canManage && <TableCell><Button size="icon" variant="ghost" onClick={() => remove(k.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button></TableCell>}
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

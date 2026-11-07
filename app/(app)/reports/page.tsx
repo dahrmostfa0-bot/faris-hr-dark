@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import { BarChart3, Users, Clock, CalendarDays, Wallet, FileText, Star, Download } from 'lucide-react';
@@ -28,6 +28,11 @@ const REPORTS: { key: ReportType; label: string; icon: typeof Users }[] = [
   { key: 'reviews', label: 'تقرير التقييم', icon: Star },
 ];
 
+// أعمدة عامة فقط (بدون الراتب والهوية والحساب البنكي)
+const EMP_REPORT_SELECT =
+  'id, employee_code, full_name, email, phone, hire_date, status, department:departments(id, name, name_ar), position:positions(id, title, title_ar)';
+const EMP_REF = 'employee:employees(id, full_name)';
+
 export default function ReportsPage() {
   const { toast } = useToast();
   const [active, setActive] = useState<ReportType>('employees');
@@ -41,37 +46,37 @@ export default function ReportsPage() {
       let rows: any[] = [];
       let chart: { name: string; value: number }[] = [];
       if (active === 'employees') {
-        const { data: d } = await supabase.from('employees').select('*, department:departments(*), position:positions(*)');
+        const { data: d } = await supabase.from('employees').select(EMP_REPORT_SELECT);
         rows = d ?? [];
         const byStatus: Record<string, number> = {};
         rows.forEach((e) => { byStatus[e.status] = (byStatus[e.status] ?? 0) + 1; });
         chart = Object.entries(byStatus).map(([name, value]) => ({ name, value }));
       } else if (active === 'attendance') {
-        const { data: d } = await supabase.from('attendance').select('*, employee:employees(*)').order('date', { ascending: false }).limit(100);
+        const { data: d } = await supabase.from('attendance').select(`*, ${EMP_REF}`).order('date', { ascending: false }).limit(100);
         rows = d ?? [];
         const byStatus: Record<string, number> = {};
         rows.forEach((a) => { byStatus[a.status] = (byStatus[a.status] ?? 0) + 1; });
         chart = Object.entries(byStatus).map(([name, value]) => ({ name, value }));
       } else if (active === 'leaves') {
-        const { data: d } = await supabase.from('leaves').select('*, employee:employees(*)').order('created_at', { ascending: false });
+        const { data: d } = await supabase.from('leaves').select(`*, ${EMP_REF}`).order('created_at', { ascending: false });
         rows = d ?? [];
         const byType: Record<string, number> = {};
         rows.forEach((l) => { byType[l.type] = (byType[l.type] ?? 0) + 1; });
         chart = Object.entries(byType).map(([name, value]) => ({ name, value }));
       } else if (active === 'payroll') {
-        const { data: d } = await supabase.from('payroll').select('*, employee:employees(*)').order('created_at', { ascending: false });
+        const { data: d } = await supabase.from('payroll').select(`*, ${EMP_REF}`).order('created_at', { ascending: false });
         rows = d ?? [];
         const byMonth: Record<string, number> = {};
         rows.forEach((p) => { const k = `${AR_MONTHS[p.month - 1]}`; byMonth[k] = (byMonth[k] ?? 0) + Number(p.net_salary); });
         chart = Object.entries(byMonth).map(([name, value]) => ({ name, value }));
       } else if (active === 'contracts') {
-        const { data: d } = await supabase.from('contracts').select('*, employee:employees(*)');
+        const { data: d } = await supabase.from('contracts').select(`*, ${EMP_REF}`);
         rows = d ?? [];
         const byStatus: Record<string, number> = {};
         rows.forEach((c) => { byStatus[c.status] = (byStatus[c.status] ?? 0) + 1; });
         chart = Object.entries(byStatus).map(([name, value]) => ({ name, value }));
       } else if (active === 'reviews') {
-        const { data: d } = await supabase.from('performance_reviews').select('*, employee:employees(*)');
+        const { data: d } = await supabase.from('performance_reviews').select(`*, ${EMP_REF}`);
         rows = d ?? [];
         const byRating: Record<string, number> = {};
         rows.forEach((r) => { const k = `${r.rating} نجوم`; byRating[k] = (byRating[k] ?? 0) + 1; });

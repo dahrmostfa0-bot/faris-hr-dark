@@ -1,4 +1,4 @@
-export type RoleName =
+ export type RoleName =
   | 'system_admin'
   | 'hr_manager'
   | 'employee_affairs'
@@ -120,8 +120,8 @@ export interface Employee {
   manager_id?: string;
   company_id?: string;
   hire_date: string;
-  basic_salary: number;
-  allowances: number;
+  basic_salary?: number;
+  allowances?: number;
   bank_account?: string;
   status: EmployeeStatus;
   notes?: string;
@@ -132,6 +132,22 @@ export interface Employee {
   position?: Position;
   branch?: Branch;
   manager?: Employee;
+}
+
+// ===== البيانات الحساسة (جداول منفصلة) =====
+
+export interface EmployeeSalary {
+  employee_id: string;
+  company_id: string;
+  basic_salary: number;
+  allowances: number;
+}
+
+export interface EmployeeIdentity {
+  employee_id: string;
+  company_id: string;
+  national_id?: string;
+  bank_account?: string;
 }
 
 export interface EmployeeDocument {

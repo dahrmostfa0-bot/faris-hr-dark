@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 import { User, Mail, Phone, Calendar, Briefcase, Wallet } from 'lucide-react';
@@ -9,23 +9,38 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase/client';
 import { formatDateAr, formatCurrency, initials } from '@/lib/format';
-import { EMPLOYEE_STATUS_LABELS, ROLE_LABELS, type Employee } from '@/lib/types';
+import { EMPLOYEE_STATUS_LABELS, COMPANY_ROLE_LABELS, type Employee, type EmployeeSalary } from '@/lib/types';
+
+const COLS =
+  'id, employee_code, full_name, email, phone, hire_date, status, department:departments!employees_department_id_fkey(id, name, name_ar), position:positions(id, title, title_ar)';
 
 export default function ProfilePage() {
-  const { user, role } = useAuth();
+  const { user, company, companyRole, loading: authLoading } = useAuth();
   const [employee, setEmployee] = useState<Employee | null>(null);
+  const [salary, setSalary] = useState<EmployeeSalary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user || !company) { setLoading(false); return; }
+    let cancelled = false;
     (async () => {
-      if (!user) return;
-      const { data } = await supabase.from('employees').select('*, department:departments(*), position:positions(*)').eq('user_id', user.id).maybeSingle();
-      setEmployee(data as Employee | null);
-      setLoading(false);
+      const { data: emp } = await supabase
+        .from('employees').select(COLS)
+        .eq('company_id', company.id).eq('user_id', user.id).maybeSingle();
+      if (cancelled) return;
+      setEmployee(emp as unknown as Employee | null);
+      if (emp) {
+        const { data: sal } = await supabase
+          .from('employee_salary').select('*').eq('employee_id', (emp as { id: string }).id).maybeSingle();
+        if (!cancelled) setSalary(sal as EmployeeSalary | null);
+      }
+      if (!cancelled) setLoading(false);
     })();
-  }, [user]);
+    return () => { cancelled = true; };
+  }, [user, company, authLoading]);
 
-  if (loading) return <div className="py-12 text-center text-muted-foreground">جاري التحميل...</div>;
+  if (loading || authLoading) return <div className="py-12 text-center text-muted-foreground">جاري التحميل...</div>;
 
   return (
     <div className="space-y-6">
@@ -41,12 +56,12 @@ export default function ProfilePage() {
           <div className="flex-1">
             <h2 className="text-xl font-bold">{employee?.full_name ?? user?.email}</h2>
             <p className="text-sm text-muted-foreground">{employee?.position?.title_ar ?? employee?.position?.title ?? 'موظف'}</p>
-            {role && <Badge variant="default" className="mt-2">{ROLE_LABELS[role]}</Badge>}
+            {companyRole && <Badge variant="default" className="mt-2">{COMPANY_ROLE_LABELS[companyRole]}</Badge>}
           </div>
         </CardContent>
       </Card>
 
-      {employee && (
+      {employee ? (
         <Card>
           <CardContent className="grid gap-4 p-6 sm:grid-cols-2 lg:grid-cols-3">
             <InfoRow icon={User} label="الرقم الوظيفي" value={employee.employee_code} />
@@ -55,11 +70,17 @@ export default function ProfilePage() {
             <InfoRow icon={Calendar} label="تاريخ التعيين" value={formatDateAr(employee.hire_date)} />
             <InfoRow icon={Briefcase} label="القسم" value={employee.department?.name_ar ?? employee.department?.name} />
             <InfoRow icon={Briefcase} label="الوظيفة" value={employee.position?.title_ar ?? employee.position?.title} />
-            <InfoRow icon={Wallet} label="الراتب الأساسي" value={formatCurrency(employee.basic_salary)} />
-            <InfoRow icon={Wallet} label="البدلات" value={formatCurrency(employee.allowances)} />
+            {salary && (
+              <>
+                <InfoRow icon={Wallet} label="الراتب الأساسي" value={formatCurrency(salary.basic_salary)} />
+                <InfoRow icon={Wallet} label="البدلات" value={formatCurrency(salary.allowances)} />
+              </>
+            )}
             <InfoRow icon={User} label="الحالة" value={EMPLOYEE_STATUS_LABELS[employee.status] ?? employee.status} />
           </CardContent>
         </Card>
+      ) : (
+        <Card><CardContent className="p-6 text-sm text-muted-foreground">حسابك غير مربوط بسجل موظف.</CardContent></Card>
       )}
     </div>
   );

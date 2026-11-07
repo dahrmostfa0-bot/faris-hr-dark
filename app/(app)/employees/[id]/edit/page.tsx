@@ -24,7 +24,7 @@ export default function EditEmployeePage() {
     (async () => {
       const { data } = await supabase
         .from('employees')
-        .select('*, department:departments!employees_department_id_fkey(*), position:positions(*), branch:branches(*), manager:employees!manager_id(id, full_name)')
+        .select('id, company_id, user_id, employee_code, full_name, email, phone, address, birth_date, marital_status, qualification, hire_date, status, notes, department_id, position_id, branch_id, manager_id')
         .eq('id', params.id as string)
         .eq('company_id', company.id)
         .maybeSingle();

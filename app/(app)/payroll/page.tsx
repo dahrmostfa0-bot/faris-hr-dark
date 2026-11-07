@@ -52,6 +52,7 @@ function emptyForm() {
 }
 
 type EmployeePay = Employee & { basic_salary?: number; allowances?: number };
+type SalaryRow = { employee_id: string; basic_salary: number; allowances: number };
 
 export default function PayrollPage() {
   const { company, companyRole } = useAuth();
@@ -78,12 +79,26 @@ export default function PayrollPage() {
   useEffect(() => {
     if (!company) { setLoading(false); return; }
     (async () => {
-      const empRes = await supabase
-        .from('employees')
-        .select('id, full_name, employee_code, basic_salary, allowances')
-        .eq('company_id', company.id)
-        .order('full_name');
-      setEmployees((empRes.data ?? []) as unknown as EmployeePay[]);
+      const [empRes, salRes] = await Promise.all([
+        supabase
+          .from('employees')
+          .select('id, full_name, employee_code')
+          .eq('company_id', company.id)
+          .order('full_name'),
+        supabase
+          .from('employee_salary')
+          .select('employee_id, basic_salary, allowances')
+          .eq('company_id', company.id),
+      ]);
+      const salMap = new Map<string, SalaryRow>(
+        ((salRes.data ?? []) as SalaryRow[]).map((s) => [s.employee_id, s]),
+      );
+      const merged = ((empRes.data ?? []) as unknown as EmployeePay[]).map((e) => ({
+        ...e,
+        basic_salary: Number(salMap.get(e.id)?.basic_salary ?? 0),
+        allowances: Number(salMap.get(e.id)?.allowances ?? 0),
+      }));
+      setEmployees(merged);
       await loadPayrolls(company.id);
       setLoading(false);
     })();
@@ -97,7 +112,6 @@ export default function PayrollPage() {
       toast({ title: 'القيم لا يمكن أن تكون سالبة', variant: 'destructive' });
       return;
     }
-    const net = calcNet(form);
     const { error } = await supabase.from('payroll').insert({
       company_id: company.id,
       employee_id: form.employee_id,
@@ -108,7 +122,7 @@ export default function PayrollPage() {
       bonuses: Number(form.bonuses),
       deductions: Number(form.deductions),
       loans: Number(form.loans),
-       overtime_pay: Number(form.overtime_pay),
+      overtime_pay: Number(form.overtime_pay),
       status: 'draft',
     });
     if (error) {

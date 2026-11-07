@@ -1,6 +1,6 @@
-'use client';
+ 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,27 +11,45 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { useEmployees } from '@/hooks/use-employees';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
-import type { Employee, EmployeeStatus } from '@/lib/types';
+import type {
+  Employee, EmployeeStatus, Department, Position, Branch,
+  EmployeeSalary, EmployeeIdentity,
+} from '@/lib/types';
 
 interface Props {
   employee?: Employee;
 }
 
+type Opt = { id: string; full_name: string };
+
+function nextCode(codes: string[]) {
+  let max = 0;
+  codes.forEach((c) => {
+    const m = /(\d+)$/.exec(c ?? '');
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return `EMP-${String(max + 1).padStart(4, '0')}`;
+}
+
 export function EmployeeForm({ employee }: Props) {
   const router = useRouter();
-  const { departments, positions, branches, employees, reload, usingMock, addEmployeeLocal, updateEmployeeLocal } = useEmployees();
-  const { company } = useAuth();
+  const { company, companyRole } = useAuth();
   const { toast } = useToast();
+  const canSensitive = companyRole === 'owner' || companyRole === 'hr_manager';
+
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [managers, setManagers] = useState<Opt[]>([]);
   const [saving, setSaving] = useState(false);
+  const [loadingPrivate, setLoadingPrivate] = useState(!!employee && canSensitive);
 
   const [form, setForm] = useState({
     employee_code: employee?.employee_code ?? '',
     full_name: employee?.full_name ?? '',
-    national_id: employee?.national_id ?? '',
     phone: employee?.phone ?? '',
     email: employee?.email ?? '',
     address: employee?.address ?? '',
@@ -43,71 +61,138 @@ export function EmployeeForm({ employee }: Props) {
     branch_id: employee?.branch_id ?? '',
     manager_id: employee?.manager_id ?? '',
     hire_date: employee?.hire_date ?? new Date().toISOString().slice(0, 10),
-    basic_salary: employee?.basic_salary ?? 0,
-    allowances: employee?.allowances ?? 0,
-    bank_account: employee?.bank_account ?? '',
     status: (employee?.status ?? 'active') as EmployeeStatus,
     notes: employee?.notes ?? '',
   });
+  const [priv, setPriv] = useState({ national_id: '', bank_account: '', basic_salary: 0, allowances: 0 });
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  // القوائم المرجعية (بفلتر الشركة) + كود الموظف التلقائي
+  useEffect(() => {
+    if (!company) return;
+    let cancelled = false;
+    (async () => {
+      const [d, p, b, e] = await Promise.all([
+        supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
+        supabase.from('positions').select('*').eq('company_id', company.id).order('title'),
+        supabase.from('branches').select('*').eq('company_id', company.id).order('name'),
+        supabase.from('employees').select('id, full_name, employee_code').eq('company_id', company.id).order('full_name'),
+      ]);
+      if (cancelled) return;
+      setDepartments((d.data ?? []) as Department[]);
+      setPositions((p.data ?? []) as Position[]);
+      setBranches((b.data ?? []) as Branch[]);
+      const emps = (e.data ?? []) as (Opt & { employee_code: string })[];
+      setManagers(emps.filter((x) => x.id !== employee?.id));
+      if (!employee) {
+        setForm((f) => (f.employee_code ? f : { ...f, employee_code: nextCode(emps.map((x) => x.employee_code)) }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [company, employee]);
+
+  // البيانات المالية والهوية (للمصرّح لهم فقط، وعند التعديل)
+  useEffect(() => {
+    if (!employee || !canSensitive) { setLoadingPrivate(false); return; }
+    let cancelled = false;
+    (async () => {
+      const [s, i] = await Promise.all([
+        supabase.from('employee_salary').select('*').eq('employee_id', employee.id).maybeSingle(),
+        supabase.from('employee_identity').select('*').eq('employee_id', employee.id).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      const sal = s.data as EmployeeSalary | null;
+      const idn = i.data as EmployeeIdentity | null;
+      setPriv({
+        national_id: idn?.national_id ?? '',
+        bank_account: idn?.bank_account ?? '',
+        basic_salary: Number(sal?.basic_salary ?? 0),
+        allowances: Number(sal?.allowances ?? 0),
+      });
+      setLoadingPrivate(false);
+    })();
+    return () => { cancelled = true; };
+  }, [employee, canSensitive]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!company) {
+      toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' });
+      return;
+    }
+    if (canSensitive && (priv.basic_salary < 0 || priv.allowances < 0)) {
+      toast({ title: 'القيم المالية لا يمكن أن تكون سالبة', variant: 'destructive' });
+      return;
+    }
+    if (employee && canSensitive && loadingPrivate) {
+      toast({ title: 'انتظر اكتمال تحميل البيانات المالية', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
 
-    const companyId = company?.id ?? null;
-
-    const payload = {
-      ...form,
-      basic_salary: Number(form.basic_salary) || 0,
-      allowances: Number(form.allowances) || 0,
+    const base = {
+      employee_code: form.employee_code.trim(),
+      full_name: form.full_name.trim(),
+      phone: form.phone || null,
+      email: form.email || null,
+      address: form.address || null,
+      birth_date: form.birth_date || null,
+      marital_status: form.marital_status || null,
+      qualification: form.qualification || null,
       department_id: form.department_id || null,
       position_id: form.position_id || null,
       branch_id: form.branch_id || null,
       manager_id: form.manager_id || null,
-      birth_date: form.birth_date || null,
-      company_id: companyId,
+      hire_date: form.hire_date,
+      status: form.status,
+      notes: form.notes || null,
     };
 
-    // Mock mode: add/update local state directly
-    if (!company || usingMock) {
-      const dept = departments.find((d) => d.id === form.department_id);
-      const localPayload = {
-        ...payload,
-        birth_date: form.birth_date || undefined,
-        department_id: form.department_id || undefined,
-        position_id: form.position_id || undefined,
-        branch_id: form.branch_id || undefined,
-        manager_id: form.manager_id || undefined,
-        company_id: companyId || undefined,
-      };
-      if (employee) {
-        updateEmployeeLocal(employee.id, { ...localPayload, department: dept });
-        toast({ title: 'تم الحفظ', description: 'تم تحديث بيانات الموظف' });
-        router.push(`/employees/${employee.id}`);
-      } else {
-        const newEmp = { id: `local-${Date.now()}`, ...localPayload, department: dept } as Employee;
-        addEmployeeLocal(newEmp);
-        toast({ title: 'تمت الإضافة', description: 'تم إضافة الموظف بنجاح' });
-        router.push(`/employees/${newEmp.id}`);
-      }
-      setSaving(false);
-      return;
-    }
+    let employeeId = employee?.id;
 
     if (employee) {
-      const { error } = await supabase.from('employees').update(payload).eq('id', employee.id);
-      if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-      else { toast({ title: 'تم الحفظ', description: 'تم تحديث بيانات الموظف' }); reload(); router.push(`/employees/${employee.id}`); }
+      const { error } = await supabase.from('employees').update(base).eq('id', employee.id).eq('company_id', company.id);
+      if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); setSaving(false); return; }
     } else {
-      const { data, error } = await supabase.from('employees').insert(payload).select().single();
-      if (error) toast({ title: 'خطأ', description: error.message, variant: 'destructive' });
-      else { toast({ title: 'تمت الإضافة', description: 'تم إضافة الموظف بنجاح' }); reload(); router.push(`/employees/${data.id}`); }
+      const { data, error } = await supabase
+        .from('employees').insert({ ...base, company_id: company.id }).select('id').single();
+      if (error || !data) { toast({ title: 'خطأ', description: error?.message ?? 'تعذر الحفظ', variant: 'destructive' }); setSaving(false); return; }
+      employeeId = data.id;
     }
+
+    if (canSensitive && employeeId) {
+      const [s, i] = await Promise.all([
+        supabase.from('employee_salary').upsert({
+          employee_id: employeeId, company_id: company.id,
+          basic_salary: Number(priv.basic_salary) || 0,
+          allowances: Number(priv.allowances) || 0,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'employee_id' }),
+        supabase.from('employee_identity').upsert({
+          employee_id: employeeId, company_id: company.id,
+          national_id: priv.national_id || null,
+          bank_account: priv.bank_account || null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'employee_id' }),
+      ]);
+      const err = s.error ?? i.error;
+      if (err) {
+        toast({
+          title: 'تم حفظ البيانات الأساسية، لكن تعذر حفظ البيانات المالية',
+          description: err.message, variant: 'destructive',
+        });
+        setSaving(false);
+        router.push(`/employees/${employeeId}`);
+        return;
+      }
+    }
+
+    toast({ title: employee ? 'تم الحفظ' : 'تمت الإضافة', description: employee ? 'تم تحديث بيانات الموظف' : 'تم إضافة الموظف بنجاح' });
     setSaving(false);
+    router.push(`/employees/${employeeId}`);
   }
 
   return (
@@ -132,10 +217,12 @@ export function EmployeeForm({ employee }: Props) {
             <Label>الاسم الكامل *</Label>
             <Input value={form.full_name} onChange={(e) => set('full_name', e.target.value)} required />
           </div>
-          <div className="space-y-2">
-            <Label>الرقم القومي</Label>
-            <Input value={form.national_id} onChange={(e) => set('national_id', e.target.value)} />
-          </div>
+          {canSensitive && (
+            <div className="space-y-2">
+              <Label>الرقم القومي</Label>
+              <Input value={priv.national_id} onChange={(e) => setPriv((p) => ({ ...p, national_id: e.target.value }))} disabled={loadingPrivate} />
+            </div>
+          )}
           <div className="space-y-2">
             <Label>الهاتف</Label>
             <Input value={form.phone} onChange={(e) => set('phone', e.target.value)} />
@@ -206,7 +293,7 @@ export function EmployeeForm({ employee }: Props) {
             <Select value={form.manager_id} onValueChange={(v) => set('manager_id', v)}>
               <SelectTrigger><SelectValue placeholder="اختر المدير" /></SelectTrigger>
               <SelectContent>
-                {employees.filter((e) => e.id !== employee?.id).map((e) => <SelectItem key={e.id} value={e.id}>{e.full_name}</SelectItem>)}
+                {managers.map((m) => <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -229,23 +316,28 @@ export function EmployeeForm({ employee }: Props) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">البيانات المالية</CardTitle></CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="space-y-2">
-            <Label>الراتب الأساسي</Label>
-            <Input type="number" value={form.basic_salary} onChange={(e) => set('basic_salary', Number(e.target.value))} />
-          </div>
-          <div className="space-y-2">
-            <Label>البدلات</Label>
-            <Input type="number" value={form.allowances} onChange={(e) => set('allowances', Number(e.target.value))} />
-          </div>
-          <div className="space-y-2">
-            <Label>رقم الحساب البنكي</Label>
-            <Input value={form.bank_account} onChange={(e) => set('bank_account', e.target.value)} />
-          </div>
-        </CardContent>
-      </Card>
+      {canSensitive && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">البيانات المالية</CardTitle></CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-2">
+              <Label>الراتب الأساسي</Label>
+              <Input type="number" min={0} value={priv.basic_salary} disabled={loadingPrivate}
+                onChange={(e) => setPriv((p) => ({ ...p, basic_salary: Number(e.target.value) }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>البدلات</Label>
+              <Input type="number" min={0} value={priv.allowances} disabled={loadingPrivate}
+                onChange={(e) => setPriv((p) => ({ ...p, allowances: Number(e.target.value) }))} />
+            </div>
+            <div className="space-y-2">
+              <Label>رقم الحساب البنكي</Label>
+              <Input value={priv.bank_account} disabled={loadingPrivate}
+                onChange={(e) => setPriv((p) => ({ ...p, bank_account: e.target.value }))} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader><CardTitle className="text-base">ملاحظات</CardTitle></CardHeader>

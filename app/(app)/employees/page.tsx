@@ -97,8 +97,14 @@ export default function EmployeesPage() {
       toast({ title: 'أكمل البيانات المطلوبة', variant: 'destructive' });
       return;
     }
+    if (canSeeSensitive && (Number(form.basic_salary) < 0 || Number(form.allowances) < 0)) {
+      toast({ title: 'القيم المالية لا يمكن أن تكون سالبة', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
-    const payload: Record<string, unknown> = {
+
+    // 1) البيانات العامة فقط في جدول employees
+    const payload = {
       company_id: company.id,
       employee_code: form.employee_code.trim(),
       full_name: form.full_name.trim(),
@@ -114,19 +120,46 @@ export default function EmployeesPage() {
       hire_date: form.hire_date,
       status: form.status,
     };
-    if (canSeeSensitive) {
-      payload.national_id = form.national_id || null;
-      payload.basic_salary = Number(form.basic_salary) || 0;
-      payload.allowances = Number(form.allowances) || 0;
-      payload.bank_account = form.bank_account || null;
-    }
 
-    const { error: insErr } = await supabase.from('employees').insert(payload);
-    setSaving(false);
-    if (insErr) {
-      toast({ title: 'خطأ', description: insErr.message, variant: 'destructive' });
+    const { data: created, error: insErr } = await supabase
+      .from('employees').insert(payload).select('id').single();
+    if (insErr || !created) {
+      setSaving(false);
+      toast({ title: 'خطأ', description: insErr?.message ?? 'تعذر الحفظ', variant: 'destructive' });
       return;
     }
+
+    // 2) المالي والهوية في الجدولين المنفصلين (للمصرّح لهم فقط)
+    if (canSeeSensitive) {
+      const now = new Date().toISOString();
+      const [s, i] = await Promise.all([
+        supabase.from('employee_salary').upsert({
+          employee_id: created.id, company_id: company.id,
+          basic_salary: Number(form.basic_salary) || 0,
+          allowances: Number(form.allowances) || 0,
+          updated_at: now,
+        }, { onConflict: 'employee_id' }),
+        supabase.from('employee_identity').upsert({
+          employee_id: created.id, company_id: company.id,
+          national_id: form.national_id || null,
+          bank_account: form.bank_account || null,
+          updated_at: now,
+        }, { onConflict: 'employee_id' }),
+      ]);
+      const err = s.error ?? i.error;
+      if (err) {
+        setSaving(false);
+        toast({
+          title: 'تمت إضافة الموظف، لكن تعذر حفظ البيانات المالية',
+          description: err.message, variant: 'destructive',
+        });
+        setAddOpen(false);
+        await reload();
+        return;
+      }
+    }
+
+    setSaving(false);
     toast({ title: 'تمت الإضافة', description: 'تم إضافة الموظف بنجاح' });
     setAddOpen(false);
     await reload();
