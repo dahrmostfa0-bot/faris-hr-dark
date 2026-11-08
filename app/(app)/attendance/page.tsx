@@ -58,6 +58,33 @@ function normTime(t: string) {
   return `${h.padStart(2, '0')}:${m}:${s ?? '00'}`;
 }
 
+// فرق توقيت القاهرة عن UTC (بالملّي ثانية) عند لحظة معيّنة (يراعي التوقيت الصيفي والشتوي)
+function cairoOffsetMs(at: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(at);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  const localAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return localAsUtc - Math.floor(at.getTime() / 1000) * 1000;
+}
+
+// يحوّل (تاريخ + وقت بتوقيت القاهرة) إلى لحظة UTC صحيحة. يرجع null لو القيمة غير صالحة.
+function cairoToDate(date: string, time: string): Date | null {
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi, s] = normTime(time).split(':').map(Number);
+  if (h > 23 || mi > 59 || (s ?? 0) > 59) return null;
+  const asUtc = Date.UTC(y, mo - 1, d, h, mi, s ?? 0);
+  let ts = asUtc;
+  for (let i = 0; i < 2; i++) ts = asUtc - cairoOffsetMs(new Date(ts));
+  const result = new Date(ts);
+  if (Number.isNaN(result.getTime())) return null;
+  // تأكد أن التاريخ لم "ينزلق" (مثل 2026-13-45)
+  if (localDateStr(result) !== date) return null;
+  return result;
+}
+
 function rpcErrorMessage(msg: string) {
   if (msg.includes('already_checked_in')) return 'سبق تسجيل حالة اليوم';
   if (msg.includes('no_open_checkin')) return 'لا يوجد حضور مفتوح لتسجيل الانصراف';
@@ -274,10 +301,10 @@ export default function AttendancePage() {
         if (!empId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !timeRe.test(inT) || (outT && !timeRe.test(outT))) {
           skipped++; continue;
         }
-        // الأوقات في الملف تُعتبر بتوقيت القاهرة
-        const checkIn = new Date(`${date}T${normTime(inT)}+03:00`);
-        const checkOut = outT ? new Date(`${date}T${normTime(outT)}+03:00`) : null;
-        if (Number.isNaN(checkIn.getTime()) || (checkOut && (Number.isNaN(checkOut.getTime()) || checkOut < checkIn))) {
+        // الأوقات في الملف بتوقيت القاهرة، ويُحسب فرق التوقيت الصحيح (صيفي/شتوي) لكل تاريخ
+        const checkIn = cairoToDate(date, inT);
+        const checkOut = outT ? cairoToDate(date, outT) : null;
+        if (!checkIn || (outT && !checkOut) || (checkOut && checkOut < checkIn)) {
           skipped++; continue;
         }
         const late = lateMinutesOf(checkIn);
