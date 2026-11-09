@@ -1,7 +1,7 @@
  'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Clock, LogIn, LogOut, Calendar, User, Filter, Upload, FileSpreadsheet, RefreshCw, Plus, Trash2, Check, UserX } from 'lucide-react';
+import { Clock, LogIn, LogOut, Calendar, User, Filter, Upload, FileSpreadsheet, RefreshCw, Plus, Trash2, Check, UserX, Star } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,11 +23,15 @@ import { hasCompanyPermission } from '@/lib/permissions';
 import { formatDateAr, formatTimeAr, AR_MONTHS } from '@/lib/format';
 import { ATTENDANCE_STATUS_LABELS, type Attendance, type Employee, type WorkSchedule } from '@/lib/types';
 
+// أنواع محلية للأعمدة الجديدة (is_default / grace_minutes / schedule_id)
+type Schedule = WorkSchedule & { is_default?: boolean; grace_minutes?: number };
+type EmpS = Employee & { schedule_id?: string | null };
+
 const ATT_SELECT = '*, employee:employees(id, full_name, employee_code)';
-const EMP_SELECT = 'id, full_name, employee_code, user_id, department:departments!employees_department_id_fkey(id, name, name_ar)';
+const EMP_SELECT = 'id, full_name, employee_code, user_id, schedule_id, department:departments!employees_department_id_fkey(id, name, name_ar)';
 const ALL_DAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 const DEFAULT_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
-const LATE_AFTER_MINUTES = 8 * 60 + 30; // التأخير بعد 8:30 صباحًا بتوقيت القاهرة
+const FALLBACK_START_MINUTES = 8 * 60 + 30; // عند عدم وجود أي موعد: التأخير بعد 8:30 صباحًا بتوقيت القاهرة
 const TZ = 'Africa/Cairo';
 
 // تاريخ القاهرة بصيغة YYYY-MM-DD بصرف النظر عن توقيت الجهاز
@@ -35,14 +39,28 @@ function localDateStr(d = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d);
 }
 
-// دقائق التأخير بتوقيت القاهرة
-function lateMinutesOf(d: Date) {
+// دقائق اليوم بتوقيت القاهرة (0..1439)
+function cairoMinutesOfDay(d: Date) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(d);
   const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
   const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
-  return Math.max(0, h * 60 + m - LATE_AFTER_MINUTES);
+  return h * 60 + m;
+}
+
+// نفس منطق الدالة calc_late_minutes في قاعدة البيانات
+// (لو غيّرت القاعدة في أحد المكانين، غيّرها في الآخر)
+function lateMinutesWith(d: Date, schedule?: Schedule | null) {
+  const minutes = cairoMinutesOfDay(d);
+  let start = FALLBACK_START_MINUTES;
+  let grace = 0;
+  if (schedule?.start_time) {
+    const [h, m] = String(schedule.start_time).split(':').map(Number);
+    start = h * 60 + m;
+    grace = Number(schedule.grace_minutes ?? 0);
+  }
+  return minutes > start + grace ? minutes - start : 0;
 }
 
 function hoursBetween(a: Date, b: Date) {
@@ -80,7 +98,6 @@ function cairoToDate(date: string, time: string): Date | null {
   for (let i = 0; i < 2; i++) ts = asUtc - cairoOffsetMs(new Date(ts));
   const result = new Date(ts);
   if (Number.isNaN(result.getTime())) return null;
-  // تأكد أن التاريخ لم "ينزلق" (مثل 2026-13-45)
   if (localDateStr(result) !== date) return null;
   return result;
 }
@@ -89,6 +106,8 @@ function rpcErrorMessage(msg: string) {
   if (msg.includes('already_checked_in')) return 'سبق تسجيل حالة اليوم';
   if (msg.includes('no_open_checkin')) return 'لا يوجد حضور مفتوح لتسجيل الانصراف';
   if (msg.includes('no_employee_record')) return 'حسابك غير مربوط بسجل موظف';
+  if (msg.includes('forbidden')) return 'لا تملك صلاحية هذا الإجراء';
+  if (msg.includes('schedule_not_found')) return 'موعد العمل غير موجود';
   return msg;
 }
 
@@ -99,8 +118,8 @@ export default function AttendancePage() {
 
   const [records, setRecords] = useState<Attendance[]>([]);
   const [todayRows, setTodayRows] = useState<Attendance[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [myEmp, setMyEmp] = useState<Employee | null>(null);
+  const [employees, setEmployees] = useState<EmpS[]>([]);
+  const [myEmp, setMyEmp] = useState<EmpS | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -113,38 +132,46 @@ export default function AttendancePage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
 
-  const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [schedulesReady, setSchedulesReady] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
-    name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', work_days: DEFAULT_DAYS,
+    name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', grace_minutes: '0', work_days: DEFAULT_DAYS,
   });
 
   const loadSchedules = useCallback(async () => {
-    if (!company) { setSchedules([]); return; }
+    if (!company) { setSchedules([]); setSchedulesReady(true); return; }
     const { data } = await supabase
       .from('work_schedules')
       .select('*')
       .eq('company_id', company.id)
       .order('created_at', { ascending: true });
-    setSchedules((data ?? []) as WorkSchedule[]);
+    setSchedules((data ?? []) as Schedule[]);
+    setSchedulesReady(true);
   }, [company]);
 
   useEffect(() => { loadSchedules(); }, [loadSchedules]);
 
-  useEffect(() => {
+  const loadEmployees = useCallback(async () => {
     if (!company) return;
-    (async () => {
-      const { data } = await supabase
-        .from('employees')
-        .select(EMP_SELECT)
-        .eq('company_id', company.id)
-        .order('full_name');
-      const list = (data ?? []) as unknown as Employee[];
-      setEmployees(list);
-      setMyEmp(user ? list.find((e) => e.user_id === user.id) ?? null : null);
-    })();
+    const { data } = await supabase
+      .from('employees')
+      .select(EMP_SELECT)
+      .eq('company_id', company.id)
+      .order('full_name');
+    const list = (data ?? []) as unknown as EmpS[];
+    setEmployees(list);
+    setMyEmp(user ? list.find((e) => e.user_id === user.id) ?? null : null);
   }, [user, company]);
+
+  useEffect(() => { loadEmployees(); }, [loadEmployees]);
+
+  // الموعد المطبّق على موظف: موعده الخاص، وإلا الافتراضي، وإلا لا شيء (قاعدة 8:30)
+  function scheduleFor(emp?: EmpS | null): Schedule | undefined {
+    const own = emp?.schedule_id ? schedules.find((s) => s.id === emp.schedule_id) : undefined;
+    return own ?? schedules.find((s) => s.is_default);
+  }
 
   const loadRecords = useCallback(async () => {
     if (!company) { setRecords([]); setLoading(false); return; }
@@ -206,10 +233,10 @@ export default function AttendancePage() {
   }
 
   // ---------- إجراءات الإدارة على الموظفين ----------
-  async function quickCheckIn(emp: Employee) {
+  async function quickCheckIn(emp: EmpS) {
     if (!company) return;
     const now = new Date();
-    const late = lateMinutesOf(now);
+    const late = lateMinutesWith(now, scheduleFor(emp));
     const { error } = await supabase.from('attendance').upsert({
       company_id: company.id,
       employee_id: emp.id,
@@ -225,7 +252,7 @@ export default function AttendancePage() {
     await refresh();
   }
 
-  async function quickMarkAbsent(emp: Employee) {
+  async function quickMarkAbsent(emp: EmpS) {
     if (!company) return;
     const { error } = await supabase.from('attendance').upsert({
       company_id: company.id,
@@ -242,7 +269,7 @@ export default function AttendancePage() {
     await refresh();
   }
 
-  async function quickCheckOut(emp: Employee) {
+  async function quickCheckOut(emp: EmpS) {
     const rec = todayRows.find((r) => r.employee_id === emp.id);
     if (!rec?.check_in) { toast({ title: 'لم يسجل الموظف الحضور بعد', variant: 'destructive' }); return; }
     if (rec.check_out) { toast({ title: 'سبق تسجيل الانصراف', variant: 'destructive' }); return; }
@@ -256,7 +283,7 @@ export default function AttendancePage() {
     await refresh();
   }
 
-  // ---------- استيراد CSV حقيقي ----------
+  // ---------- استيراد CSV ----------
   function handleFileSelection(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -271,6 +298,10 @@ export default function AttendancePage() {
 
   async function importCsv() {
     if (!company || !selectedFile || importing) return;
+    if (!schedulesReady) {
+      toast({ title: 'انتظر تحميل مواعيد العمل ثم أعد المحاولة', variant: 'destructive' });
+      return;
+    }
     setImporting(true);
     try {
       const text = (await selectedFile.text()).replace(/^\uFEFF/, '');
@@ -287,18 +318,18 @@ export default function AttendancePage() {
         throw new Error('الأعمدة المطلوبة: employee_code,date,check_in,check_out');
       }
 
-      const byCode = new Map(employees.map((e) => [e.employee_code, e.id]));
+      const byCode = new Map(employees.map((e) => [e.employee_code, e]));
       const timeRe = /^\d{1,2}:\d{2}(:\d{2})?$/;
       const rows = new Map<string, Record<string, unknown>>();
       let skipped = 0;
 
       for (const line of lines.slice(1)) {
         const c = splitCsvLine(line);
-        const empId = byCode.get(c[iCode]);
+        const emp = byCode.get(c[iCode]);
         const date = c[iDate];
         const inT = c[iIn];
         const outT = iOut >= 0 ? c[iOut] : '';
-        if (!empId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !timeRe.test(inT) || (outT && !timeRe.test(outT))) {
+        if (!emp || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !timeRe.test(inT) || (outT && !timeRe.test(outT))) {
           skipped++; continue;
         }
         // الأوقات في الملف بتوقيت القاهرة، ويُحسب فرق التوقيت الصحيح (صيفي/شتوي) لكل تاريخ
@@ -307,10 +338,10 @@ export default function AttendancePage() {
         if (!checkIn || (outT && !checkOut) || (checkOut && checkOut < checkIn)) {
           skipped++; continue;
         }
-        const late = lateMinutesOf(checkIn);
-        rows.set(`${empId}|${date}`, {
+        const late = lateMinutesWith(checkIn, scheduleFor(emp));
+        rows.set(`${emp.id}|${date}`, {
           company_id: company.id,
-          employee_id: empId,
+          employee_id: emp.id,
           date,
           check_in: checkIn.toISOString(),
           check_out: checkOut ? checkOut.toISOString() : null,
@@ -347,6 +378,11 @@ export default function AttendancePage() {
     if (!company || savingSchedule) return;
     if (!scheduleForm.name.trim()) { toast({ title: 'أدخل اسم الموعد', variant: 'destructive' }); return; }
     if (scheduleForm.work_days.length === 0) { toast({ title: 'اختر يوم عمل واحدًا على الأقل', variant: 'destructive' }); return; }
+    const grace = Number(scheduleForm.grace_minutes);
+    if (!Number.isFinite(grace) || grace < 0 || grace > 240) {
+      toast({ title: 'دقائق السماح من 0 إلى 240', variant: 'destructive' });
+      return;
+    }
     setSavingSchedule(true);
     const { error } = await supabase.from('work_schedules').insert({
       company_id: company.id,
@@ -354,23 +390,34 @@ export default function AttendancePage() {
       start_time: scheduleForm.start_time,
       end_time: scheduleForm.end_time,
       break_minutes: Math.max(0, Number(scheduleForm.break_minutes) || 0),
+      grace_minutes: Math.round(grace),
       work_days: scheduleForm.work_days,
     });
     setSavingSchedule(false);
     if (error) { toast({ title: 'تعذر حفظ موعد العمل', description: error.message, variant: 'destructive' }); return; }
-    setScheduleForm({ name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', work_days: DEFAULT_DAYS });
+    setScheduleForm({ name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', grace_minutes: '0', work_days: DEFAULT_DAYS });
     setScheduleOpen(false);
     toast({ title: 'تمت إضافة موعد العمل' });
     await loadSchedules();
   }
 
-  async function deleteWorkSchedule(schedule: WorkSchedule) {
+  async function setDefaultSchedule(schedule: Schedule, value: boolean) {
+    const { error } = await supabase.rpc('set_default_schedule', { p_schedule_id: schedule.id, p_value: value });
+    if (error) { toast({ title: 'تعذر تحديث الموعد الافتراضي', description: rpcErrorMessage(error.message), variant: 'destructive' }); return; }
+    toast({ title: value ? 'تم تعيين الموعد كافتراضي' : 'تم إلغاء الموعد الافتراضي' });
+    await loadSchedules();
+  }
+
+  async function deleteWorkSchedule(schedule: Schedule) {
     if (!company) return;
-    if (!confirm(`حذف موعد العمل "${schedule.name}"؟`)) return;
+    const msg = schedule.is_default
+      ? `"${schedule.name}" هو الموعد الافتراضي. بعد حذفه يعود احتساب التأخير إلى 8:30 للموظفين بلا موعد خاص. متابعة الحذف؟`
+      : `حذف موعد العمل "${schedule.name}"؟ الموظفون المرتبطون به سيتبعون الموعد الافتراضي.`;
+    if (!confirm(msg)) return;
     const { error } = await supabase.from('work_schedules').delete().eq('id', schedule.id).eq('company_id', company.id);
     if (error) { toast({ title: 'تعذر حذف موعد العمل', description: error.message, variant: 'destructive' }); return; }
     toast({ title: 'تم حذف موعد العمل' });
-    await loadSchedules();
+    await Promise.all([loadSchedules(), loadEmployees()]);
   }
 
   // ---------- مشتقات العرض ----------
@@ -384,6 +431,7 @@ export default function AttendancePage() {
   const myTodayRec = myEmp ? todayMap.get(myEmp.id) : undefined;
   const hasCheckedIn = !!myTodayRec;
   const hasCheckedOut = !!myTodayRec?.check_out;
+  const defaultSchedule = schedules.find((s) => s.is_default);
 
   const tabs: { key: 'attendance' | 'schedules' | 'management'; label: string }[] = [
     { key: 'attendance', label: 'سجل الحضور والغياب' },
@@ -564,7 +612,9 @@ export default function AttendancePage() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-base">مواعيد العمل</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">ساعات الدوام وأيام العمل المعتمدة (للاطلاع، ولا تغيّر قاعدة احتساب التأخير).</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  الموعد الافتراضي تُحسب عليه دقائق التأخير لكل الموظفين الذين ليس لهم موعد خاص (يُحدَّد من صفحة تعديل الموظف). بدون موعد افتراضي يُحسب التأخير بعد 8:30 صباحًا.
+                </p>
               </div>
               {canManage && (
                 <Button onClick={() => setScheduleOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> إضافة موعد عمل جديد</Button>
@@ -577,12 +627,24 @@ export default function AttendancePage() {
             ) : schedules.map((schedule) => (
               <div key={schedule.id} className="flex flex-col gap-3 rounded-xl border border-border/60 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="font-semibold">{schedule.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{String(schedule.start_time).slice(0, 5)} – {String(schedule.end_time).slice(0, 5)} · استراحة {schedule.break_minutes} دقيقة</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold">{schedule.name}</p>
+                    {schedule.is_default && <Badge variant="success" className="gap-1"><Star className="h-3 w-3" /> افتراضي</Badge>}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {String(schedule.start_time).slice(0, 5)} – {String(schedule.end_time).slice(0, 5)} · استراحة {schedule.break_minutes} دقيقة · سماح {schedule.grace_minutes ?? 0} دقيقة
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-1.5">{schedule.work_days.map((day) => <Badge key={day} variant="secondary">{day}</Badge>)}</div>
                 </div>
                 {canManage && (
-                  <Button variant="ghost" size="icon" onClick={() => deleteWorkSchedule(schedule)} aria-label={`حذف ${schedule.name}`}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                  <div className="flex items-center gap-1">
+                    {schedule.is_default ? (
+                      <Button variant="outline" size="sm" onClick={() => setDefaultSchedule(schedule, false)}>إلغاء الافتراضي</Button>
+                    ) : (
+                      <Button variant="outline" size="sm" onClick={() => setDefaultSchedule(schedule, true)}>تعيين كافتراضي</Button>
+                    )}
+                    <Button variant="ghost" size="icon" onClick={() => deleteWorkSchedule(schedule)} aria-label={`حذف ${schedule.name}`}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                  </div>
                 )}
               </div>
             ))}
@@ -607,6 +669,7 @@ export default function AttendancePage() {
                       <TableHead>رقم الموظف</TableHead>
                       <TableHead>اسم الموظف</TableHead>
                       <TableHead>القسم</TableHead>
+                      <TableHead>الموعد</TableHead>
                       <TableHead>وقت الحضور الفعلي</TableHead>
                       <TableHead>الحالة</TableHead>
                       <TableHead>الإجراءات المباشرة</TableHead>
@@ -616,11 +679,15 @@ export default function AttendancePage() {
                     {employees.map((emp) => {
                       const rec = todayMap.get(emp.id);
                       const status = rec?.status;
+                      const sched = scheduleFor(emp);
                       return (
                         <TableRow key={emp.id} className="transition-colors hover:bg-muted/40">
                           <TableCell className="font-mono text-sm">{emp.employee_code}</TableCell>
                           <TableCell className="font-medium">{emp.full_name}</TableCell>
                           <TableCell>{emp.department?.name_ar ?? emp.department?.name ?? '-'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {sched ? `${sched.name}${emp.schedule_id ? '' : ' (افتراضي)'}` : '8:30 (بدون موعد)'}
+                          </TableCell>
                           <TableCell className="font-mono text-sm">{rec?.check_in ? formatTimeAr(rec.check_in) : '-'}</TableCell>
                           <TableCell>
                             {status ? (
@@ -664,7 +731,10 @@ export default function AttendancePage() {
               <div><label className="mb-1 block text-sm text-muted-foreground">وقت الحضور</label><Input type="time" value={scheduleForm.start_time} onChange={(e) => setScheduleForm((f) => ({ ...f, start_time: e.target.value }))} /></div>
               <div><label className="mb-1 block text-sm text-muted-foreground">وقت الانصراف</label><Input type="time" value={scheduleForm.end_time} onChange={(e) => setScheduleForm((f) => ({ ...f, end_time: e.target.value }))} /></div>
             </div>
-            <div><label className="mb-1 block text-sm text-muted-foreground">مدة الاستراحة بالدقائق</label><Input type="number" min="0" max="480" value={scheduleForm.break_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, break_minutes: e.target.value }))} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="mb-1 block text-sm text-muted-foreground">مدة الاستراحة بالدقائق</label><Input type="number" min="0" max="480" value={scheduleForm.break_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, break_minutes: e.target.value }))} /></div>
+              <div><label className="mb-1 block text-sm text-muted-foreground">دقائق السماح بعد الحضور</label><Input type="number" min="0" max="240" value={scheduleForm.grace_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, grace_minutes: e.target.value }))} /></div>
+            </div>
             <div>
               <label className="mb-1 block text-sm text-muted-foreground">أيام العمل</label>
               <div className="flex flex-wrap gap-2">
@@ -673,6 +743,9 @@ export default function AttendancePage() {
                 ))}
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              مثال: دوام 8:00 وسماح 15 دقيقة. من يصل 8:10 غير متأخر، ومن يصل 8:20 متأخر 20 دقيقة (تُحسب من بداية الدوام).
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setScheduleOpen(false)}>إلغاء</Button>
@@ -701,11 +774,14 @@ export default function AttendancePage() {
               employee_code,date,check_in,check_out<br />
               EMP-002,2026-10-20,08:10,16:05
             </div>
-            <p className="text-xs text-muted-foreground">الرقم الوظيفي لازم يطابق موظفًا موجودًا، والتاريخ بصيغة YYYY-MM-DD، والوقت HH:MM بتوقيت القاهرة. الصفوف غير الصالحة تُتخطى.</p>
+            <p className="text-xs text-muted-foreground">
+              الرقم الوظيفي لازم يطابق موظفًا موجودًا، والتاريخ بصيغة YYYY-MM-DD، والوقت HH:MM بتوقيت القاهرة. الصفوف غير الصالحة تُتخطى.
+              {defaultSchedule ? ` التأخير يُحسب حسب موعد كل موظف أو الموعد الافتراضي "${defaultSchedule.name}".` : ' لا يوجد موعد افتراضي، فالتأخير يُحسب بعد 8:30.'}
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)}>إلغاء</Button>
-            <Button onClick={importCsv} disabled={importing || !selectedFile} className="gap-2 bg-teal-600 text-white hover:bg-teal-700">
+            <Button onClick={importCsv} disabled={importing || !selectedFile || !schedulesReady} className="gap-2 bg-teal-600 text-white hover:bg-teal-700">
               {importing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               {importing ? 'جاري الاستيراد...' : 'استيراد'}
             </Button>
