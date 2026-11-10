@@ -19,11 +19,17 @@ import type {
   EmployeeSalary, EmployeeIdentity,
 } from '@/lib/types';
 
+// الموظف مع عمود الموعد الجديد (غير موجود في lib/types.ts)
+type EmployeeWithSchedule = Employee & { schedule_id?: string | null };
+
 interface Props {
-  employee?: Employee;
+  employee?: EmployeeWithSchedule;
 }
 
 type Opt = { id: string; full_name: string };
+type ScheduleOpt = { id: string; name: string; start_time: string; end_time: string; is_default?: boolean };
+
+const DEFAULT_SCHEDULE_VALUE = '__default__';
 
 function nextCode(codes: string[]) {
   let max = 0;
@@ -44,6 +50,7 @@ export function EmployeeForm({ employee }: Props) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [managers, setManagers] = useState<Opt[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleOpt[]>([]);
   const [saving, setSaving] = useState(false);
   const [loadingPrivate, setLoadingPrivate] = useState(!!employee && canSensitive);
 
@@ -60,6 +67,7 @@ export function EmployeeForm({ employee }: Props) {
     position_id: employee?.position_id ?? '',
     branch_id: employee?.branch_id ?? '',
     manager_id: employee?.manager_id ?? '',
+    schedule_id: employee?.schedule_id ?? '',
     hire_date: employee?.hire_date ?? new Date().toISOString().slice(0, 10),
     status: (employee?.status ?? 'active') as EmployeeStatus,
     notes: employee?.notes ?? '',
@@ -75,21 +83,21 @@ export function EmployeeForm({ employee }: Props) {
     if (!company) return;
     let cancelled = false;
     (async () => {
-      const [d, p, b, e] = await Promise.all([
+      const [d, p, b, e, s] = await Promise.all([
         supabase.from('departments').select('*').eq('company_id', company.id).order('name'),
         supabase.from('positions').select('*').eq('company_id', company.id).order('title'),
         supabase.from('branches').select('*').eq('company_id', company.id).order('name'),
         supabase.from('employees').select('id, full_name, employee_code').eq('company_id', company.id).order('full_name'),
+        supabase.from('work_schedules').select('id, name, start_time, end_time, is_default').eq('company_id', company.id).order('created_at'),
       ]);
       if (cancelled) return;
       setDepartments((d.data ?? []) as Department[]);
       setPositions((p.data ?? []) as Position[]);
       setBranches((b.data ?? []) as Branch[]);
+      setSchedules((s.data ?? []) as ScheduleOpt[]);
       const emps = (e.data ?? []) as (Opt & { employee_code: string })[];
       setManagers(emps.filter((x) => x.id !== employee?.id));
-      if (!employee) {
-        setForm((f) => (f.employee_code ? f : { ...f, employee_code: nextCode(emps.map((x) => x.employee_code)) }));
-      }
+      if (!employee) setForm((f) => (f.employee_code ? f : { ...f, employee_code: nextCode(emps.map((x) => x.employee_code)) }));
     })();
     return () => { cancelled = true; };
   }, [company, employee]);
@@ -136,19 +144,20 @@ export function EmployeeForm({ employee }: Props) {
     const base = {
       employee_code: form.employee_code.trim(),
       full_name: form.full_name.trim(),
-      phone: form.phone || null,
-      email: form.email || null,
-      address: form.address || null,
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || null,
+      address: form.address.trim() || null,
       birth_date: form.birth_date || null,
       marital_status: form.marital_status || null,
-      qualification: form.qualification || null,
+      qualification: form.qualification.trim() || null,
       department_id: form.department_id || null,
       position_id: form.position_id || null,
       branch_id: form.branch_id || null,
       manager_id: form.manager_id || null,
+      schedule_id: form.schedule_id || null,
       hire_date: form.hire_date,
       status: form.status,
-      notes: form.notes || null,
+      notes: form.notes.trim() || null,
     };
 
     let employeeId = employee?.id;
@@ -173,8 +182,8 @@ export function EmployeeForm({ employee }: Props) {
         }, { onConflict: 'employee_id' }),
         supabase.from('employee_identity').upsert({
           employee_id: employeeId, company_id: company.id,
-          national_id: priv.national_id || null,
-          bank_account: priv.bank_account || null,
+          national_id: priv.national_id.trim() || null,
+          bank_account: priv.bank_account.trim() || null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'employee_id' }),
       ]);
@@ -194,6 +203,8 @@ export function EmployeeForm({ employee }: Props) {
     setSaving(false);
     router.push(`/employees/${employeeId}`);
   }
+
+  const defaultSchedule = schedules.find((s) => s.is_default);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -294,6 +305,25 @@ export function EmployeeForm({ employee }: Props) {
               <SelectTrigger><SelectValue placeholder="اختر المدير" /></SelectTrigger>
               <SelectContent>
                 {managers.map((m) => <SelectItem key={m.id} value={m.id}>{m.full_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>موعد العمل</Label>
+            <Select
+              value={form.schedule_id || DEFAULT_SCHEDULE_VALUE}
+              onValueChange={(v) => set('schedule_id', v === DEFAULT_SCHEDULE_VALUE ? '' : v)}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_SCHEDULE_VALUE}>
+                  {defaultSchedule ? `الموعد الافتراضي (${defaultSchedule.name})` : 'الموعد الافتراضي (8:30 إن لم يوجد)'}
+                </SelectItem>
+                {schedules.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} ({String(s.start_time).slice(0, 5)} - {String(s.end_time).slice(0, 5)})
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
