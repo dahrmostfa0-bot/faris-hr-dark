@@ -23,8 +23,8 @@ import { hasCompanyPermission } from '@/lib/permissions';
 import { formatDateAr, formatTimeAr, AR_MONTHS } from '@/lib/format';
 import { ATTENDANCE_STATUS_LABELS, type Attendance, type Employee, type WorkSchedule } from '@/lib/types';
 
-// أنواع محلية للأعمدة الجديدة (is_default / grace_minutes / schedule_id)
-type Schedule = WorkSchedule & { is_default?: boolean; grace_minutes?: number };
+// أنواع محلية للأعمدة الجديدة (is_default / grace_minutes / overtime_after_minutes / schedule_id)
+type Schedule = WorkSchedule & { is_default?: boolean; grace_minutes?: number; overtime_after_minutes?: number };
 type EmpS = Employee & { schedule_id?: string | null };
 
 const ATT_SELECT = '*, employee:employees(id, full_name, employee_code)';
@@ -32,6 +32,7 @@ const EMP_SELECT = 'id, full_name, employee_code, user_id, schedule_id, departme
 const ALL_DAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 const DEFAULT_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
 const FALLBACK_START_MINUTES = 8 * 60 + 30; // عند عدم وجود أي موعد: التأخير بعد 8:30 صباحًا بتوقيت القاهرة
+const DEFAULT_OVERTIME_AFTER = 30; // الحد الأدنى للإضافي بالدقائق إن لم يحدَّد في الموعد
 const TZ = 'Africa/Cairo';
 
 // تاريخ القاهرة بصيغة YYYY-MM-DD بصرف النظر عن توقيت الجهاز
@@ -49,6 +50,11 @@ function cairoMinutesOfDay(d: Date) {
   return h * 60 + m;
 }
 
+function timeToMinutes(t: string) {
+  const [h, m] = String(t).split(':').map(Number);
+  return h * 60 + m;
+}
+
 // نفس منطق الدالة calc_late_minutes في قاعدة البيانات
 // (لو غيّرت القاعدة في أحد المكانين، غيّرها في الآخر)
 function lateMinutesWith(d: Date, schedule?: Schedule | null) {
@@ -56,11 +62,25 @@ function lateMinutesWith(d: Date, schedule?: Schedule | null) {
   let start = FALLBACK_START_MINUTES;
   let grace = 0;
   if (schedule?.start_time) {
-    const [h, m] = String(schedule.start_time).split(':').map(Number);
-    start = h * 60 + m;
+    start = timeToMinutes(schedule.start_time);
     grace = Number(schedule.grace_minutes ?? 0);
   }
   return minutes > start + grace ? minutes - start : 0;
+}
+
+// نفس منطق الدالة calc_overtime_hours في قاعدة البيانات
+// (لو غيّرت القاعدة في أحد المكانين، غيّرها في الآخر)
+// الإضافي = الوقت بعد نهاية الدوام، إن بلغ الحد الأدنى. بدون موعد أو بدوام ليلي أو انصراف في يوم آخر: 0
+function overtimeHoursWith(checkOut: Date, dateStr: string, schedule?: Schedule | null) {
+  if (localDateStr(checkOut) !== dateStr) return 0;
+  if (!schedule?.start_time || !schedule?.end_time) return 0;
+  const start = timeToMinutes(schedule.start_time);
+  const end = timeToMinutes(schedule.end_time);
+  if (end <= start) return 0;
+  const over = cairoMinutesOfDay(checkOut) - end;
+  const minOver = Number(schedule.overtime_after_minutes ?? DEFAULT_OVERTIME_AFTER);
+  if (over > 0 && over >= minOver) return Math.round((over / 60) * 100) / 100;
+  return 0;
 }
 
 function hoursBetween(a: Date, b: Date) {
@@ -137,7 +157,8 @@ export default function AttendancePage() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({
-    name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', grace_minutes: '0', work_days: DEFAULT_DAYS,
+    name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', grace_minutes: '0',
+    overtime_after_minutes: String(DEFAULT_OVERTIME_AFTER), work_days: DEFAULT_DAYS,
   });
 
   const loadSchedules = useCallback(async () => {
@@ -244,6 +265,7 @@ export default function AttendancePage() {
       check_in: now.toISOString(),
       check_out: null,
       work_hours: 0,
+      overtime_hours: 0,
       late_minutes: late,
       status: late > 0 ? 'late' : 'present',
     }, { onConflict: 'employee_id,date' });
@@ -261,6 +283,7 @@ export default function AttendancePage() {
       check_in: null,
       check_out: null,
       work_hours: 0,
+      overtime_hours: 0,
       late_minutes: 0,
       status: 'absent',
     }, { onConflict: 'employee_id,date' });
@@ -276,7 +299,11 @@ export default function AttendancePage() {
     const now = new Date();
     const { error } = await supabase
       .from('attendance')
-      .update({ check_out: now.toISOString(), work_hours: hoursBetween(new Date(rec.check_in), now) })
+      .update({
+        check_out: now.toISOString(),
+        work_hours: hoursBetween(new Date(rec.check_in), now),
+        overtime_hours: overtimeHoursWith(now, rec.date, scheduleFor(emp)),
+      })
       .eq('id', rec.id);
     if (error) { toast({ title: 'خطأ', description: error.message, variant: 'destructive' }); return; }
     toast({ title: 'تم تسجيل الانصراف', description: emp.full_name });
@@ -338,7 +365,8 @@ export default function AttendancePage() {
         if (!checkIn || (outT && !checkOut) || (checkOut && checkOut < checkIn)) {
           skipped++; continue;
         }
-        const late = lateMinutesWith(checkIn, scheduleFor(emp));
+        const sched = scheduleFor(emp);
+        const late = lateMinutesWith(checkIn, sched);
         rows.set(`${emp.id}|${date}`, {
           company_id: company.id,
           employee_id: emp.id,
@@ -346,6 +374,7 @@ export default function AttendancePage() {
           check_in: checkIn.toISOString(),
           check_out: checkOut ? checkOut.toISOString() : null,
           work_hours: checkOut ? hoursBetween(checkIn, checkOut) : 0,
+          overtime_hours: checkOut ? overtimeHoursWith(checkOut, date, sched) : 0,
           late_minutes: late,
           status: late > 0 ? 'late' : 'present',
         });
@@ -383,6 +412,11 @@ export default function AttendancePage() {
       toast({ title: 'دقائق السماح من 0 إلى 240', variant: 'destructive' });
       return;
     }
+    const ot = Number(scheduleForm.overtime_after_minutes);
+    if (!Number.isFinite(ot) || ot < 0 || ot > 480) {
+      toast({ title: 'الحد الأدنى للإضافي من 0 إلى 480 دقيقة', variant: 'destructive' });
+      return;
+    }
     setSavingSchedule(true);
     const { error } = await supabase.from('work_schedules').insert({
       company_id: company.id,
@@ -391,11 +425,15 @@ export default function AttendancePage() {
       end_time: scheduleForm.end_time,
       break_minutes: Math.max(0, Number(scheduleForm.break_minutes) || 0),
       grace_minutes: Math.round(grace),
+      overtime_after_minutes: Math.round(ot),
       work_days: scheduleForm.work_days,
     });
     setSavingSchedule(false);
     if (error) { toast({ title: 'تعذر حفظ موعد العمل', description: error.message, variant: 'destructive' }); return; }
-    setScheduleForm({ name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', grace_minutes: '0', work_days: DEFAULT_DAYS });
+    setScheduleForm({
+      name: '', start_time: '08:00', end_time: '16:00', break_minutes: '60', grace_minutes: '0',
+      overtime_after_minutes: String(DEFAULT_OVERTIME_AFTER), work_days: DEFAULT_DAYS,
+    });
     setScheduleOpen(false);
     toast({ title: 'تمت إضافة موعد العمل' });
     await loadSchedules();
@@ -411,7 +449,7 @@ export default function AttendancePage() {
   async function deleteWorkSchedule(schedule: Schedule) {
     if (!company) return;
     const msg = schedule.is_default
-      ? `"${schedule.name}" هو الموعد الافتراضي. بعد حذفه يعود احتساب التأخير إلى 8:30 للموظفين بلا موعد خاص. متابعة الحذف؟`
+      ? `"${schedule.name}" هو الموعد الافتراضي. بعد حذفه يعود احتساب التأخير إلى 8:30 ولا يُحتسب إضافي للموظفين بلا موعد خاص. متابعة الحذف؟`
       : `حذف موعد العمل "${schedule.name}"؟ الموظفون المرتبطون به سيتبعون الموعد الافتراضي.`;
     if (!confirm(msg)) return;
     const { error } = await supabase.from('work_schedules').delete().eq('id', schedule.id).eq('company_id', company.id);
@@ -424,7 +462,7 @@ export default function AttendancePage() {
   const present = todayRows.filter((r) => r.status === 'present').length;
   const late = todayRows.filter((r) => r.status === 'late').length;
   const absent = todayRows.filter((r) => r.status === 'absent').length;
-  const totalOT = records.reduce((s, r) => s + Number(r.overtime_hours || 0), 0);
+  const totalOT = Math.round(records.reduce((s, r) => s + Number(r.overtime_hours || 0), 0) * 100) / 100;
   const todayMap = new Map<string, Attendance>();
   todayRows.forEach((r) => todayMap.set(r.employee_id, r));
 
@@ -613,7 +651,7 @@ export default function AttendancePage() {
               <div>
                 <CardTitle className="text-base">مواعيد العمل</CardTitle>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  الموعد الافتراضي تُحسب عليه دقائق التأخير لكل الموظفين الذين ليس لهم موعد خاص (يُحدَّد من صفحة تعديل الموظف). بدون موعد افتراضي يُحسب التأخير بعد 8:30 صباحًا.
+                  الموعد الافتراضي تُحسب عليه دقائق التأخير والساعات الإضافية لكل الموظفين الذين ليس لهم موعد خاص (يُحدَّد من صفحة تعديل الموظف). بدون موعد افتراضي يُحسب التأخير بعد 8:30 صباحًا ولا يُحتسب إضافي.
                 </p>
               </div>
               {canManage && (
@@ -632,7 +670,7 @@ export default function AttendancePage() {
                     {schedule.is_default && <Badge variant="success" className="gap-1"><Star className="h-3 w-3" /> افتراضي</Badge>}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {String(schedule.start_time).slice(0, 5)} – {String(schedule.end_time).slice(0, 5)} · استراحة {schedule.break_minutes} دقيقة · سماح {schedule.grace_minutes ?? 0} دقيقة
+                    {String(schedule.start_time).slice(0, 5)} – {String(schedule.end_time).slice(0, 5)} · استراحة {schedule.break_minutes} دقيقة · سماح {schedule.grace_minutes ?? 0} دقيقة · إضافي بعد {schedule.overtime_after_minutes ?? DEFAULT_OVERTIME_AFTER} دقيقة
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1.5">{schedule.work_days.map((day) => <Badge key={day} variant="secondary">{day}</Badge>)}</div>
                 </div>
@@ -731,9 +769,10 @@ export default function AttendancePage() {
               <div><label className="mb-1 block text-sm text-muted-foreground">وقت الحضور</label><Input type="time" value={scheduleForm.start_time} onChange={(e) => setScheduleForm((f) => ({ ...f, start_time: e.target.value }))} /></div>
               <div><label className="mb-1 block text-sm text-muted-foreground">وقت الانصراف</label><Input type="time" value={scheduleForm.end_time} onChange={(e) => setScheduleForm((f) => ({ ...f, end_time: e.target.value }))} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="mb-1 block text-sm text-muted-foreground">مدة الاستراحة بالدقائق</label><Input type="number" min="0" max="480" value={scheduleForm.break_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, break_minutes: e.target.value }))} /></div>
-              <div><label className="mb-1 block text-sm text-muted-foreground">دقائق السماح بعد الحضور</label><Input type="number" min="0" max="240" value={scheduleForm.grace_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, grace_minutes: e.target.value }))} /></div>
+            <div className="grid grid-cols-3 gap-3">
+              <div><label className="mb-1 block text-sm text-muted-foreground">الاستراحة (دقائق)</label><Input type="number" min="0" max="480" value={scheduleForm.break_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, break_minutes: e.target.value }))} /></div>
+              <div><label className="mb-1 block text-sm text-muted-foreground">السماح بعد الحضور</label><Input type="number" min="0" max="240" value={scheduleForm.grace_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, grace_minutes: e.target.value }))} /></div>
+              <div><label className="mb-1 block text-sm text-muted-foreground">الحد الأدنى للإضافي</label><Input type="number" min="0" max="480" value={scheduleForm.overtime_after_minutes} onChange={(e) => setScheduleForm((f) => ({ ...f, overtime_after_minutes: e.target.value }))} /></div>
             </div>
             <div>
               <label className="mb-1 block text-sm text-muted-foreground">أيام العمل</label>
@@ -745,6 +784,7 @@ export default function AttendancePage() {
             </div>
             <p className="text-xs text-muted-foreground">
               مثال: دوام 8:00 وسماح 15 دقيقة. من يصل 8:10 غير متأخر، ومن يصل 8:20 متأخر 20 دقيقة (تُحسب من بداية الدوام).
+              الإضافي: يُحسب الوقت بعد نهاية الدوام كاملًا إن بلغ الحد الأدنى (مثلًا نهاية 16:00 وحد أدنى 30 دقيقة: انصراف 16:20 لا إضافي، وانصراف 17:15 إضافي 1.25 ساعة). الدوام الذي يعبر منتصف الليل غير مدعوم حاليًا.
             </p>
           </div>
           <DialogFooter>
@@ -776,7 +816,7 @@ export default function AttendancePage() {
             </div>
             <p className="text-xs text-muted-foreground">
               الرقم الوظيفي لازم يطابق موظفًا موجودًا، والتاريخ بصيغة YYYY-MM-DD، والوقت HH:MM بتوقيت القاهرة. الصفوف غير الصالحة تُتخطى.
-              {defaultSchedule ? ` التأخير يُحسب حسب موعد كل موظف أو الموعد الافتراضي "${defaultSchedule.name}".` : ' لا يوجد موعد افتراضي، فالتأخير يُحسب بعد 8:30.'}
+              {defaultSchedule ? ` التأخير والإضافي يُحسبان حسب موعد كل موظف أو الموعد الافتراضي "${defaultSchedule.name}".` : ' لا يوجد موعد افتراضي، فالتأخير يُحسب بعد 8:30 ولا يُحتسب إضافي.'}
             </p>
           </div>
           <DialogFooter>
