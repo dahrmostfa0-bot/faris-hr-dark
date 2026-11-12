@@ -54,6 +54,10 @@ function emptyForm() {
 type EmployeePay = Employee & { basic_salary?: number; allowances?: number };
 type SalaryRow = { employee_id: string; basic_salary: number; allowances: number };
 
+// قيم مبدئية لاقتراح أجر الإضافي. يراجعها المحاسب ويعدّلها حسب سياسة المؤسسة والقانون.
+const DEFAULT_OT_MULTIPLIER = '1.5';
+const DEFAULT_MONTHLY_HOURS = '208';
+
 export default function PayrollPage() {
   const { company, companyRole } = useAuth();
   const { toast } = useToast();
@@ -66,6 +70,12 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm());
+
+  // ساعات الإضافي المسجّلة للموظف في الشهر المختار (اقتراح فقط)
+  const [otHours, setOtHours] = useState<number | null>(null);
+  const [otLoading, setOtLoading] = useState(false);
+  const [otError, setOtError] = useState<string | null>(null);
+  const [otCfg, setOtCfg] = useState({ multiplier: DEFAULT_OT_MULTIPLIER, monthlyHours: DEFAULT_MONTHLY_HOURS });
 
   async function loadPayrolls(companyId: string) {
     const { data } = await supabase
@@ -103,6 +113,59 @@ export default function PayrollPage() {
       setLoading(false);
     })();
   }, [company]);
+
+  // جلب مجموع ساعات الإضافي للموظف في الشهر المختار
+  useEffect(() => {
+    if (!open || !company || !form.employee_id) {
+      setOtHours(null);
+      setOtError(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setOtLoading(true);
+      setOtError(null);
+      const mm = String(form.month).padStart(2, '0');
+      const start = `${form.year}-${mm}-01`;
+      const next = form.month === 12
+        ? `${form.year + 1}-01-01`
+        : `${form.year}-${String(form.month + 1).padStart(2, '0')}-01`;
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('overtime_hours')
+        .eq('company_id', company.id)
+        .eq('employee_id', form.employee_id)
+        .gte('date', start)
+        .lt('date', next);
+      if (cancelled) return;
+      setOtLoading(false);
+      if (error) { setOtHours(null); setOtError(error.message); return; }
+      const rows = (data ?? []) as { overtime_hours: number | null }[];
+      const total = rows.reduce((s, r) => s + Number(r.overtime_hours || 0), 0);
+      setOtHours(Math.round(total * 100) / 100);
+    })();
+    return () => { cancelled = true; };
+  }, [open, company, form.employee_id, form.month, form.year]);
+
+  function applyOvertimePay() {
+    const mult = Number(otCfg.multiplier);
+    const monthly = Number(otCfg.monthlyHours);
+    if (!Number.isFinite(mult) || mult < 0 || !Number.isFinite(monthly) || monthly <= 0) {
+      toast({ title: 'راجع المضاعف وساعات الشهر القياسية', variant: 'destructive' });
+      return;
+    }
+    if (otHours == null) {
+      toast({ title: 'اختر موظفًا لتحميل ساعات الإضافي', variant: 'destructive' });
+      return;
+    }
+    const hourly = Number(form.basic_salary) / monthly;
+    const pay = Math.round(otHours * hourly * mult * 100) / 100;
+    setForm({ ...form, overtime_pay: pay });
+    toast({
+      title: 'تم احتساب أجر الإضافي',
+      description: `${otHours} ساعة × ${formatCurrency(hourly)} للساعة × ${mult} = ${formatCurrency(pay)}`,
+    });
+  }
 
   async function handleSubmit() {
     if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
@@ -257,7 +320,7 @@ export default function PayrollPage() {
       />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto" aria-describedby={undefined}>
           <DialogHeader><DialogTitle>إنشاء كشف راتب</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
@@ -278,6 +341,36 @@ export default function PayrollPage() {
             <div className="space-y-2"><Label>الخصومات</Label><Input type="number" min={0} value={form.deductions} onChange={(e) => setForm({ ...form, deductions: Number(e.target.value) })} /></div>
             <div className="space-y-2"><Label>السلف</Label><Input type="number" min={0} value={form.loans} onChange={(e) => setForm({ ...form, loans: Number(e.target.value) })} /></div>
             <div className="space-y-2"><Label>أجر إضافي</Label><Input type="number" min={0} value={form.overtime_pay} onChange={(e) => setForm({ ...form, overtime_pay: Number(e.target.value) })} /></div>
+
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-sm sm:col-span-2">
+              <p className="font-medium">اقتراح أجر الإضافي من سجل الحضور</p>
+              {!form.employee_id ? (
+                <p className="text-muted-foreground">اختر الموظف أولًا لعرض ساعات الإضافي المسجّلة في الشهر.</p>
+              ) : otLoading ? (
+                <p className="text-muted-foreground">جاري قراءة ساعات الإضافي...</p>
+              ) : otError ? (
+                <p className="text-destructive">تعذر قراءة سجل الحضور: {otError}</p>
+              ) : (
+                <p>ساعات الإضافي المسجّلة في الشهر المختار: <span className="font-bold">{otHours ?? 0} ساعة</span></p>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">مضاعف الإضافي</Label>
+                  <Input type="number" min={0} step="0.25" value={otCfg.multiplier} onChange={(e) => setOtCfg({ ...otCfg, multiplier: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">ساعات الشهر القياسية</Label>
+                  <Input type="number" min={1} value={otCfg.monthlyHours} onChange={(e) => setOtCfg({ ...otCfg, monthlyHours: e.target.value })} />
+                </div>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={applyOvertimePay} disabled={!form.employee_id || otLoading || otHours == null}>
+                احسب أجر الإضافي
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                أجر الإضافي = الساعات × (الراتب الأساسي ÷ ساعات الشهر القياسية) × المضاعف. القيمتان المبدئيتان (1.5 و208) للبداية فقط، راجعهما مع المحاسب حسب سياسة المؤسسة والقانون. الناتج اقتراح تقدر تعدّله في خانة "أجر إضافي" قبل الحفظ.
+              </p>
+            </div>
+
             <div className="sm:col-span-2 rounded-lg bg-muted/50 p-3 text-sm">
               صافي الراتب المتوقع: <span className="font-bold">{formatCurrency(previewNet)}</span>
             </div>
