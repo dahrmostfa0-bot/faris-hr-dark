@@ -1,7 +1,7 @@
  'use client';
 
 import { useEffect, useState } from 'react';
-import { Wallet, Plus, Download, FileSpreadsheet, Printer } from 'lucide-react';
+import { Wallet, Plus, Download, FileSpreadsheet, Printer, Settings2 } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -51,12 +51,28 @@ function emptyForm() {
   };
 }
 
-type EmployeePay = Employee & { basic_salary?: number; allowances?: number };
-type SalaryRow = { employee_id: string; basic_salary: number; allowances: number };
+type EmployeePay = Employee & { basic_salary?: number; allowances?: number; insured_wage?: number | null };
+type SalaryRow = { employee_id: string; basic_salary: number; allowances: number; insured_wage: number | null };
+type SettingsRow = {
+  employee_insurance_rate: number | null;
+  min_insurable_wage: number | null;
+  max_insurable_wage: number | null;
+};
 
 // قيم مبدئية لاقتراح أجر الإضافي. يراجعها المحاسب ويعدّلها حسب سياسة المؤسسة والقانون.
 const DEFAULT_OT_MULTIPLIER = '1.5';
 const DEFAULT_MONTHLY_HOURS = '208';
+
+// قيم مرجعية تُملأ بزر في نافذة الإعدادات (لا تُحفظ تلقائيًا). مصدرها إعلان الهيئة القومية للتأمين الاجتماعي (يناير 2026)
+// ونص القانون 148 لسنة 2019. قد تتغير في يناير 2027، فراجعها مع مكتب التأمينات أو المحاسب.
+const REFERENCE_SETTINGS = { rate: '11', min: '2700', max: '16700' };
+
+function numOrNull(v: string) {
+  const t = v.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
 
 export default function PayrollPage() {
   const { company, companyRole } = useAuth();
@@ -77,6 +93,17 @@ export default function PayrollPage() {
   const [otError, setOtError] = useState<string | null>(null);
   const [otCfg, setOtCfg] = useState({ multiplier: DEFAULT_OT_MULTIPLIER, monthlyHours: DEFAULT_MONTHLY_HOURS });
 
+  // إعدادات التأمينات لكل شركة (من جدول payroll_settings)
+  const [settings, setSettings] = useState<SettingsRow | null>(null);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({ rate: '', min: '', max: '' });
+
+  // اقتراح خصم التأمينات داخل نافذة الكشف
+  const [insWage, setInsWage] = useState('');
+  const [appliedIns, setAppliedIns] = useState(0);
+
   async function loadPayrolls(companyId: string) {
     const { data } = await supabase
       .from('payroll')
@@ -84,6 +111,22 @@ export default function PayrollPage() {
       .eq('company_id', companyId)
       .order('created_at', { ascending: false });
     setPayrolls((data ?? []) as unknown as Payroll[]);
+  }
+
+  async function loadSettings(companyId: string) {
+    const { data } = await supabase
+      .from('payroll_settings')
+      .select('employee_insurance_rate, min_insurable_wage, max_insurable_wage')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    const row = (data ?? null) as SettingsRow | null;
+    setSettings(row);
+    setSettingsForm({
+      rate: row?.employee_insurance_rate != null ? String(row.employee_insurance_rate) : '',
+      min: row?.min_insurable_wage != null ? String(row.min_insurable_wage) : '',
+      max: row?.max_insurable_wage != null ? String(row.max_insurable_wage) : '',
+    });
+    setSettingsLoaded(true);
   }
 
   useEffect(() => {
@@ -97,7 +140,7 @@ export default function PayrollPage() {
           .order('full_name'),
         supabase
           .from('employee_salary')
-          .select('employee_id, basic_salary, allowances')
+          .select('employee_id, basic_salary, allowances, insured_wage')
           .eq('company_id', company.id),
       ]);
       const salMap = new Map<string, SalaryRow>(
@@ -107,9 +150,11 @@ export default function PayrollPage() {
         ...e,
         basic_salary: Number(salMap.get(e.id)?.basic_salary ?? 0),
         allowances: Number(salMap.get(e.id)?.allowances ?? 0),
+        insured_wage: salMap.get(e.id)?.insured_wage ?? null,
       }));
       setEmployees(merged);
       await loadPayrolls(company.id);
+      await loadSettings(company.id);
       setLoading(false);
     })();
   }, [company]);
@@ -167,6 +212,75 @@ export default function PayrollPage() {
     });
   }
 
+  // ---------- التأمينات ----------
+  const rateNum = settings?.employee_insurance_rate ?? null;
+  const settingsReady = rateNum != null;
+
+  function insuranceAmount(): number | null {
+    if (!settingsReady) return null;
+    const wage = Number(insWage);
+    if (!Number.isFinite(wage) || wage < 0) return null;
+    let base = wage;
+    if (settings?.min_insurable_wage != null && base < settings.min_insurable_wage) base = settings.min_insurable_wage;
+    if (settings?.max_insurable_wage != null && base > settings.max_insurable_wage) base = settings.max_insurable_wage;
+    return Math.round(base * (Number(rateNum) / 100) * 100) / 100;
+  }
+
+  function insuredBase(): number | null {
+    if (!settingsReady) return null;
+    const wage = Number(insWage);
+    if (!Number.isFinite(wage) || wage < 0) return null;
+    let base = wage;
+    if (settings?.min_insurable_wage != null && base < settings.min_insurable_wage) base = settings.min_insurable_wage;
+    if (settings?.max_insurable_wage != null && base > settings.max_insurable_wage) base = settings.max_insurable_wage;
+    return base;
+  }
+
+  function applyInsurance() {
+    const amount = insuranceAmount();
+    if (amount == null) {
+      toast({ title: 'راجع إعدادات التأمينات وأجر الاشتراك', variant: 'destructive' });
+      return;
+    }
+    // يستبدل المبلغ المضاف سابقًا بدل أن يكرره
+    const nextDed = Math.max(0, Math.round((Number(form.deductions) - appliedIns + amount) * 100) / 100);
+    setForm({ ...form, deductions: nextDed });
+    setAppliedIns(amount);
+    toast({ title: 'تمت إضافة خصم التأمينات للخصومات', description: formatCurrency(amount) });
+  }
+
+  async function saveSettings() {
+    if (!company || savingSettings) return;
+    const rate = numOrNull(settingsForm.rate);
+    const min = numOrNull(settingsForm.min);
+    const max = numOrNull(settingsForm.max);
+    if (rate == null || Number.isNaN(rate) || rate < 0 || rate > 40) {
+      toast({ title: 'نسبة حصة الموظف من 0 إلى 40', variant: 'destructive' });
+      return;
+    }
+    if (Number.isNaN(min) || Number.isNaN(max) || (min != null && min < 0) || (max != null && max < 0)) {
+      toast({ title: 'حدّا الأجر لازم أرقام موجبة أو فارغين', variant: 'destructive' });
+      return;
+    }
+    if (min != null && max != null && max < min) {
+      toast({ title: 'الحد الأقصى أقل من الحد الأدنى', variant: 'destructive' });
+      return;
+    }
+    setSavingSettings(true);
+    const { error } = await supabase.from('payroll_settings').upsert({
+      company_id: company.id,
+      employee_insurance_rate: rate,
+      min_insurable_wage: min,
+      max_insurable_wage: max,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'company_id' });
+    setSavingSettings(false);
+    if (error) { toast({ title: 'تعذر حفظ الإعدادات', description: error.message, variant: 'destructive' }); return; }
+    toast({ title: 'تم حفظ إعدادات التأمينات' });
+    setSettingsOpen(false);
+    await loadSettings(company.id);
+  }
+
   async function handleSubmit() {
     if (!company) { toast({ title: 'خطأ', description: 'لا توجد شركة مرتبطة بالحساب', variant: 'destructive' }); return; }
     if (!form.employee_id) { toast({ title: 'اختر موظف', variant: 'destructive' }); return; }
@@ -200,6 +314,8 @@ export default function PayrollPage() {
     toast({ title: 'تم إنشاء كشف الرواتب' });
     setOpen(false);
     setForm(emptyForm());
+    setAppliedIns(0);
+    setInsWage('');
     await loadPayrolls(company.id);
   }
 
@@ -304,6 +420,8 @@ export default function PayrollPage() {
   }
 
   const previewNet = calcNet(form);
+  const insAmount = insuranceAmount();
+  const insBase = insuredBase();
 
   return (
     <div className="space-y-6">
@@ -312,12 +430,46 @@ export default function PayrollPage() {
         description={`إجمالي صافي الرواتب: ${formatCurrency(totalNet)}`}
         actions={
           <>
+            {canManage && <Button variant="outline" onClick={() => setSettingsOpen(true)}><Settings2 className="ml-2 h-4 w-4" /> إعدادات التأمينات</Button>}
             {canExport && <Button variant="outline" onClick={printMasir}><Printer className="ml-2 h-4 w-4" /> طباعة المسير</Button>}
             {canExport && <Button variant="outline" onClick={exportCsv}><Download className="ml-2 h-4 w-4" /> تصدير Excel</Button>}
             {canManage && <Button onClick={() => setOpen(true)}><Plus className="ml-2 h-4 w-4" /> كشف راتب جديد</Button>}
           </>
         }
       />
+
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-lg" aria-describedby={undefined}>
+          <DialogHeader><DialogTitle>إعدادات التأمينات</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>نسبة حصة الموظف من أجر الاشتراك (%)</Label>
+              <Input type="number" min={0} max={40} step="0.25" placeholder="مثال: 11" value={settingsForm.rate} onChange={(e) => setSettingsForm({ ...settingsForm, rate: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>الحد الأدنى لأجر الاشتراك</Label>
+                <Input type="number" min={0} placeholder="اختياري" value={settingsForm.min} onChange={(e) => setSettingsForm({ ...settingsForm, min: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>الحد الأقصى لأجر الاشتراك</Label>
+                <Input type="number" min={0} placeholder="اختياري" value={settingsForm.max} onChange={(e) => setSettingsForm({ ...settingsForm, max: e.target.value })} />
+              </div>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => setSettingsForm({ rate: REFERENCE_SETTINGS.rate, min: REFERENCE_SETTINGS.min, max: REFERENCE_SETTINGS.max })}>
+              املأ بالقيم المرجعية (يناير 2026)
+            </Button>
+            <p className="text-xs leading-6 text-muted-foreground">
+              القيم المرجعية: حصة الموظف 11% (9% معاش + 1% صحي + 1% مكافأة) وحدّا الأجر 2700 و16700 حسب إعلان الهيئة القومية للتأمين الاجتماعي ونص القانون 148 لسنة 2019. الزر يملأ الخانات فقط ولا يحفظ.
+              راجعها مع مكتب التأمينات أو المحاسب قبل الحفظ، فقد تتغير في يناير 2027. حتى حفظ الإعدادات لا يظهر اقتراح خصم التأمينات في كشف الراتب.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettingsOpen(false)}>إلغاء</Button>
+            <Button onClick={saveSettings} disabled={savingSettings}>{savingSettings ? 'جاري الحفظ...' : 'حفظ'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto" aria-describedby={undefined}>
@@ -327,7 +479,13 @@ export default function PayrollPage() {
               <Label>الموظف</Label>
               <Select value={form.employee_id} onValueChange={(v) => {
                 const emp = employees.find((e) => e.id === v);
-                setForm({ ...form, employee_id: v, basic_salary: Number(emp?.basic_salary ?? 0), allowances: Number(emp?.allowances ?? 0) });
+                const basic = Number(emp?.basic_salary ?? 0);
+                const allow = Number(emp?.allowances ?? 0);
+                // يشيل خصم التأمينات المضاف للموظف السابق قبل الانتقال لموظف آخر
+                const keptDeductions = Math.max(0, Number(form.deductions) - appliedIns);
+                setAppliedIns(0);
+                setInsWage(String(emp?.insured_wage ?? basic + allow));
+                setForm({ ...form, employee_id: v, basic_salary: basic, allowances: allow, deductions: keptDeductions });
               }}>
                 <SelectTrigger><SelectValue placeholder="اختر الموظف" /></SelectTrigger>
                 <SelectContent>{employees.map((e) => <SelectItem key={e.id} value={e.id}>{e.full_name}</SelectItem>)}</SelectContent>
@@ -368,6 +526,39 @@ export default function PayrollPage() {
               </Button>
               <p className="text-xs text-muted-foreground">
                 أجر الإضافي = الساعات × (الراتب الأساسي ÷ ساعات الشهر القياسية) × المضاعف. القيمتان المبدئيتان (1.5 و208) للبداية فقط، راجعهما مع المحاسب حسب سياسة المؤسسة والقانون. الناتج اقتراح تقدر تعدّله في خانة "أجر إضافي" قبل الحفظ.
+              </p>
+            </div>
+
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3 text-sm sm:col-span-2">
+              <p className="font-medium">اقتراح خصم التأمينات (حصة الموظف)</p>
+              {!settingsLoaded ? (
+                <p className="text-muted-foreground">جاري تحميل الإعدادات...</p>
+              ) : !settingsReady ? (
+                <p className="text-muted-foreground">لم تُحفظ إعدادات التأمينات بعد. افتح "إعدادات التأمينات" من أعلى الصفحة وأدخل النسبة وحدّي الأجر.</p>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">أجر الاشتراك (مبدئيًا الأساسي + البدلات، عدّله إن اختلف)</Label>
+                    <Input type="number" min={0} value={insWage} onChange={(e) => setInsWage(e.target.value)} disabled={!form.employee_id} />
+                  </div>
+                  <p className="text-muted-foreground">
+                    النسبة {rateNum}%
+                    {settings?.min_insurable_wage != null ? ` · حد أدنى ${formatCurrency(settings.min_insurable_wage)}` : ''}
+                    {settings?.max_insurable_wage != null ? ` · حد أقصى ${formatCurrency(settings.max_insurable_wage)}` : ''}
+                  </p>
+                  {insAmount != null && insBase != null && form.employee_id && (
+                    <p>
+                      الحساب على <span className="font-bold">{formatCurrency(insBase)}</span>
+                      {' '}= خصم <span className="font-bold">{formatCurrency(insAmount)}</span>
+                    </p>
+                  )}
+                  <Button type="button" variant="outline" size="sm" onClick={applyInsurance} disabled={!form.employee_id || insAmount == null}>
+                    {appliedIns > 0 ? 'حدّث خصم التأمينات في الخصومات' : 'أضف خصم التأمينات إلى الخصومات'}
+                  </Button>
+                </>
+              )}
+              <p className="text-xs text-muted-foreground">
+                القطاع الخاص يحسب الاشتراكات على أجر شهر يناير من كل سنة حسب نص القانون، فاعتمد أجر الاشتراك الفعلي المسجّل عند مكتب التأمينات. الضريبة لا تُحسب هنا: أدخلها يدويًا ضمن الخصومات. الناتج اقتراح تقدر تعدّله في خانة "الخصومات" قبل الحفظ.
               </p>
             </div>
 
