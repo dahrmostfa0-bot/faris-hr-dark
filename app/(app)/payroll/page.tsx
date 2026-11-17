@@ -1,4 +1,4 @@
- 'use client';
+'use client';
 
 import { useEffect, useState } from 'react';
 import { Wallet, Plus, Download, FileSpreadsheet, Printer, Settings2 } from 'lucide-react';
@@ -216,24 +216,22 @@ export default function PayrollPage() {
   const rateNum = settings?.employee_insurance_rate ?? null;
   const settingsReady = rateNum != null;
 
-  function insuranceAmount(): number | null {
-    if (!settingsReady) return null;
-    const wage = Number(insWage);
-    if (!Number.isFinite(wage) || wage < 0) return null;
-    let base = wage;
-    if (settings?.min_insurable_wage != null && base < settings.min_insurable_wage) base = settings.min_insurable_wage;
-    if (settings?.max_insurable_wage != null && base > settings.max_insurable_wage) base = settings.max_insurable_wage;
-    return Math.round(base * (Number(rateNum) / 100) * 100) / 100;
-  }
-
+  // أجر الاشتراك صفر أو فاضي يعني لا تأمين، فالخصم صفر (الحد الأدنى لا ينطبق على من لا يُؤمَّن عليه)
   function insuredBase(): number | null {
     if (!settingsReady) return null;
     const wage = Number(insWage);
     if (!Number.isFinite(wage) || wage < 0) return null;
+    if (wage === 0) return 0;
     let base = wage;
     if (settings?.min_insurable_wage != null && base < settings.min_insurable_wage) base = settings.min_insurable_wage;
     if (settings?.max_insurable_wage != null && base > settings.max_insurable_wage) base = settings.max_insurable_wage;
     return base;
+  }
+
+  function insuranceAmount(): number | null {
+    const base = insuredBase();
+    if (base == null) return null;
+    return Math.round(base * (Number(rateNum) / 100) * 100) / 100;
   }
 
   function applyInsurance() {
